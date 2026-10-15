@@ -10,7 +10,9 @@
           "temperature_entity": "Kamertemperatuur",
           "target_entity": "Doeltemperatuur",
           "outdoor_entity": "Actuele buitentemperatuur",
-          "control_mode": "Regelmodus"
+          "control_mode": "Regelmodus",
+          "hysteresis_on": "Opstart: inschakelen zoveel °C onder doel",
+          "hysteresis_off": "Opstart: uitschakelen zoveel °C boven doel (0 = op doel)"
         }
       },
       "valves": {
@@ -23,6 +25,7 @@
       }
     },
     "error": {
+      "invalid_hysteresis": "Gebruik afstanden van 0 tot 2 °C; niet beide nul. Deze grenzen gelden alleen tijdens Hysteresis, niet voor PI.",
       "invalid_pairs": "Selecteer evenveel opening- en closing-entiteiten; minimaal één paar.",
       "duplicate_valves": "Een klepentiteit mag maar één keer voorkomen.",
       "valve_in_use": "Een geselecteerde klep is al gekoppeld aan een andere SmartPI-instantie.",
@@ -43,7 +46,9 @@
           "temperature_entity": "Kamertemperatuur",
           "target_entity": "Doeltemperatuur",
           "outdoor_entity": "Actuele buitentemperatuur",
-          "control_mode": "Regelmodus"
+          "control_mode": "Regelmodus",
+          "hysteresis_on": "Opstart: inschakelen zoveel °C onder doel",
+          "hysteresis_off": "Opstart: uitschakelen zoveel °C boven doel (0 = op doel)"
         }
       },
       "valves": {
@@ -56,6 +61,7 @@
       }
     },
     "error": {
+      "invalid_hysteresis": "Gebruik afstanden van 0 tot 2 °C; niet beide nul. Deze grenzen gelden alleen tijdens Hysteresis, niet voor PI.",
       "invalid_pairs": "Selecteer evenveel opening- en closing-entiteiten; minimaal één paar.",
       "duplicate_valves": "Een klepentiteit mag maar één keer voorkomen.",
       "valve_in_use": "Een geselecteerde klep is al gekoppeld aan een andere SmartPI-instantie.",

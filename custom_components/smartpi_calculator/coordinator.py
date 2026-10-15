@@ -26,6 +26,7 @@ from .const import (
     SOURCE_KEYS,
     UPSTREAM_COMMIT,
     control_mode,
+    hysteresis_margins,
 )
 from .engine import Calculator, Inputs
 from .valve import ValveController, valve_bindings
@@ -66,11 +67,17 @@ class CalculatorCoordinator(DataUpdateCoordinator[float]):
             == self._application_binding()
             else None
         )
+        try:
+            hysteresis_on, hysteresis_off = hysteresis_margins(self.settings)
+        except ValueError as err:
+            raise ConfigEntryError("Invalid bootstrap hysteresis margins") from err
         self.engine = Calculator(
             self.hass,
             self.entry.title,
             output_applied=self.mode == MODE_EXTERNAL,
             saved_state=state,
+            hysteresis_on=hysteresis_on,
+            hysteresis_off=hysteresis_off,
         )
         if self.mode == MODE_DIRECT:
             try:

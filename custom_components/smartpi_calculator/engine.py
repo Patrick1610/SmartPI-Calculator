@@ -11,7 +11,15 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from .const import CYCLE_MINUTES, SAMPLE_SECONDS
+from .const import (
+    CONF_HYSTERESIS_OFF,
+    CONF_HYSTERESIS_ON,
+    CYCLE_MINUTES,
+    DEFAULT_HYSTERESIS_OFF,
+    DEFAULT_HYSTERESIS_ON,
+    SAMPLE_SECONDS,
+    hysteresis_margins,
+)
 from .vendor.algo import SmartPI
 from .vendor.hvac_mode import VThermHvacMode_HEAT, VThermHvacMode_OFF
 from .vendor.smartpi.command_ownership import project_cycle_command
@@ -34,8 +42,23 @@ class Inputs:
 class Calculator:
     """Hold persistent model state and time-weighted command history."""
 
-    def __init__(self, hass, name: str, *, output_applied=False, saved_state=None):
+    def __init__(
+        self,
+        hass,
+        name: str,
+        *,
+        output_applied=False,
+        saved_state=None,
+        hysteresis_on=DEFAULT_HYSTERESIS_ON,
+        hysteresis_off=DEFAULT_HYSTERESIS_OFF,
+    ):
         self.output_applied = output_applied
+        hysteresis_on, hysteresis_off = hysteresis_margins(
+            {
+                CONF_HYSTERESIS_ON: hysteresis_on,
+                CONF_HYSTERESIS_OFF: hysteresis_off,
+            }
+        )
         self.algo = SmartPI(
             hass,
             CYCLE_MINUTES,
@@ -44,6 +67,8 @@ class Calculator:
             name,
             saved_state=saved_state,
             use_ff3=True,
+            hysteresis_on=hysteresis_on,
+            hysteresis_off=hysteresis_off,
         )
         # Continuous numeric output; no valve curve or extra actuator rounding.
         self.algo.configure_valve_linearization(False, None, valve_mode=True)
@@ -171,6 +196,7 @@ class Calculator:
             "thermal_loss": self.algo.b,
             "learned_heating_samples": self.algo.meas_count_a,
             "learned_cooling_samples": self.algo.meas_count_b,
+            "last_learning_result": self.algo.learn_last_reason,
             "cycle_minutes": CYCLE_MINUTES,
             "pump_overrun_protection": False,
         }

@@ -7,6 +7,9 @@ from homeassistant.core import callback
 from homeassistant.helpers.selector import (
     EntitySelector,
     EntitySelectorConfig,
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -15,23 +18,35 @@ from homeassistant.helpers.selector import (
 
 from .const import (
     CONF_CLOSING,
+    CONF_HYSTERESIS_OFF,
+    CONF_HYSTERESIS_ON,
     CONF_MODE,
     CONF_OPENING,
     CONF_OUTPUT_APPLIED,
+    DEFAULT_HYSTERESIS_OFF,
+    DEFAULT_HYSTERESIS_ON,
     DOMAIN,
     MODE_DIRECT,
     MODE_DISABLED,
     MODE_EXTERNAL,
     SOURCE_KEYS,
     control_mode,
+    hysteresis_margins,
 )
 from .valve import valve_bindings
 
 
 def schema(defaults, *, options=False):
     fields = {}
+    # Error redisplays must also be valid JSON for the real HA frontend.
+    try:
+        on, off = hysteresis_margins(defaults)
+    except ValueError:
+        on, off = DEFAULT_HYSTERESIS_ON, DEFAULT_HYSTERESIS_OFF
     if not options:
-        fields[vol.Required(CONF_NAME, default="SmartPI")] = str
+        fields[vol.Required(CONF_NAME, default=defaults.get(CONF_NAME, "SmartPI"))] = (
+            str
+        )
     for key in SOURCE_KEYS:
         fields[vol.Required(key, default=defaults.get(key, vol.UNDEFINED))] = (
             EntitySelector(
@@ -48,6 +63,19 @@ def schema(defaults, *, options=False):
             ],
         )
     )
+    for key, default in (
+        (CONF_HYSTERESIS_ON, on),
+        (CONF_HYSTERESIS_OFF, off),
+    ):
+        fields[vol.Required(key, default=default)] = NumberSelector(
+            NumberSelectorConfig(
+                min=0,
+                max=2,
+                step=0.05,
+                mode=NumberSelectorMode.BOX,
+                unit_of_measurement="°C",
+            )
+        )
     return vol.Schema(fields)
 
 
@@ -69,6 +97,8 @@ class ModeFlow:
 
     def _clean(self, values):
         values = dict(values)
+        on, off = hysteresis_margins(values)
+        values.update({CONF_HYSTERESIS_ON: on, CONF_HYSTERESIS_OFF: off})
         values[CONF_MODE] = control_mode(values)
         values.pop(CONF_OUTPUT_APPLIED, None)
         if values[CONF_MODE] != MODE_DIRECT:
@@ -109,9 +139,16 @@ class ConfigFlow(ModeFlow, config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(self, user_input=None):
         if user_input is not None:
+            try:
+                self._pending = self._clean(user_input)
+            except ValueError:
+                return self.async_show_form(
+                    step_id="user",
+                    data_schema=schema(user_input),
+                    errors={"base": "invalid_hysteresis"},
+                )
             await self.async_set_unique_id(user_input[SOURCE_KEYS[0]])
             self._abort_if_unique_id_configured()
-            self._pending = self._clean(user_input)
             if self._pending[CONF_MODE] == MODE_DIRECT:
                 return await self.async_step_valves()
             return self._finish(self._pending)
@@ -138,6 +175,14 @@ class OptionsFlow(ModeFlow, config_entries.OptionsFlow):
 
     async def async_step_init(self, user_input=None):
         if user_input is not None:
+            try:
+                self._pending = self._clean(user_input)
+            except ValueError:
+                return self.async_show_form(
+                    step_id="init",
+                    data_schema=schema(user_input, options=True),
+                    errors={"base": "invalid_hysteresis"},
+                )
             room_source = user_input[SOURCE_KEYS[0]]
             for other in self.hass.config_entries.async_entries(DOMAIN):
                 if (
@@ -145,7 +190,6 @@ class OptionsFlow(ModeFlow, config_entries.OptionsFlow):
                     and {**other.data, **other.options}[SOURCE_KEYS[0]] == room_source
                 ):
                     return self.async_abort(reason="already_configured")
-            self._pending = self._clean(user_input)
             if self._pending[CONF_MODE] == MODE_DIRECT:
                 return await self.async_step_valves()
             return self._finish({**self._pending, CONF_OPENING: [], CONF_CLOSING: []})

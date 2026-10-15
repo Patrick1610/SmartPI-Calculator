@@ -22,6 +22,10 @@ async def async_setup_entry(hass, entry, async_add_entities):
             ],
             PhaseSensor(entry),
             LearningStatusSensor(entry),
+            ValveStatusSensor(entry),
+            LearningSampleSensor(entry, "heating"),
+            LearningSampleSensor(entry, "cooling"),
+            LastLearningResultSensor(entry),
         ]
     )
 
@@ -145,3 +149,65 @@ class LearningStatusSensor(CalculatorSensor):
                 "learned_cooling_samples",
             )
         }
+
+
+class ValveStatusSensor(CalculatorSensor):
+    """Keep endpoint failures visible even when calculation is unavailable."""
+
+    _attr_name = "Valve control status"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = [
+        "not_configured",
+        "starting",
+        "pending",
+        "failed",
+        "unavailable",
+        "confirmed",
+    ]
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:valve"
+
+    def __init__(self, entry):
+        super().__init__(entry, "valve_control_status")
+
+    @property
+    def available(self):
+        return True
+
+    @property
+    def native_value(self):
+        valves = self.coordinator.valves
+        return valves.status if valves else "not_configured"
+
+
+class LearningSampleSensor(CalculatorSensor):
+    """Accepted model samples, not every temperature report or control cycle."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:counter"
+    _attr_suggested_display_precision = 0
+
+    def __init__(self, entry, kind):
+        super().__init__(entry, f"learned_{kind}_samples")
+        self._key = f"learned_{kind}_samples"
+        self._attr_name = f"Accepted {kind} samples"
+
+    @property
+    def native_value(self):
+        return self.coordinator.model_diagnostics()[self._key]
+
+
+class LastLearningResultSensor(CalculatorSensor):
+    """Last core learning result, not a claim about the current blocking cause."""
+
+    _attr_name = "Last learning result"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:school-outline"
+
+    def __init__(self, entry):
+        super().__init__(entry, "last_learning_result")
+
+    @property
+    def native_value(self):
+        result = self.coordinator.model_diagnostics()["last_learning_result"]
+        return str(result)[:255] if result is not None else None

@@ -50,6 +50,47 @@ async def test_bootstrap_does_not_close_at_target(clock):
     assert await engine.step(Inputs(20.6, 20, 10)) == 0
 
 
+async def test_custom_bootstrap_closes_at_target_and_keeps_hysteresis(clock):
+    engine = Calculator(Mock(), "Tight band", hysteresis_on=0.2, hysteresis_off=0)
+    for room, expected in ((19, 100), (19.9, 100), (20, 0), (19.9, 0), (19.8, 100)):
+        assert await engine.step(Inputs(room, 20, 10)) == expected
+        clock[0] += 30
+
+
+async def test_changed_margins_keep_saved_model_and_integral(clock):
+    engine = Calculator(Mock(), "Saved")
+    engine.algo.ctl.integral = 1.25
+    saved = engine.snapshot()
+    restored = Calculator(
+        Mock(), "Saved", saved_state=saved, hysteresis_on=0.2, hysteresis_off=0
+    )
+    assert restored.algo.ctl.integral == 1.25
+    assert restored.algo._hyst_on == 0.2
+    assert restored.algo._hyst_off == 0
+
+
+def test_learning_result_is_the_actual_core_reason():
+    engine = Calculator(Mock(), "Reason")
+    engine.algo.est.learn_last_reason = "skip: delta too small"
+    assert engine.diagnostics()["last_learning_result"] == "skip: delta too small"
+
+
+async def test_custom_bootstrap_thresholds_do_not_change_stable_pi(clock):
+    engines = [
+        Calculator(Mock(), "Default"),
+        Calculator(Mock(), "Tight", hysteresis_on=0.2, hysteresis_off=0),
+    ]
+    for engine in engines:
+        engine.algo.est.a_meas_hist.extend([0.05] * 6)
+        engine.algo.est.b_meas_hist.extend([0.001] * 8)
+        engine.algo.ctl.integral = 1.0
+        assert engine.algo.phase.value == "Stable"
+    for room in (19, 19.9, 20, 20.1):
+        outputs = [await engine.step(Inputs(room, 20, 10)) for engine in engines]
+        assert outputs[0] == pytest.approx(outputs[1])
+        clock[0] += 30
+
+
 def test_stable_controller_can_hold_heat_at_setpoint():
     ctl = SmartPIController("Holding")
     ctl.integral = 1.0

@@ -10,7 +10,9 @@
           "temperature_entity": "Room temperature",
           "target_entity": "Target temperature",
           "outdoor_entity": "Current outdoor temperature",
-          "control_mode": "Control mode"
+          "control_mode": "Control mode",
+          "hysteresis_on": "Bootstrap: switch on this many °C below target",
+          "hysteresis_off": "Bootstrap: switch off this many °C above target (0 = at target)"
         }
       },
       "valves": {
@@ -23,6 +25,7 @@
       }
     },
     "error": {
+      "invalid_hysteresis": "Use distances from 0 to 2 °C, not both zero. These thresholds apply only during Hysteresis, not PI.",
       "invalid_pairs": "Select an equal, nonzero number of opening and closing entities.",
       "duplicate_valves": "Each valve entity must be unique.",
       "valve_in_use": "A selected valve already belongs to another SmartPI instance.",
@@ -43,7 +46,9 @@
           "temperature_entity": "Room temperature",
           "target_entity": "Target temperature",
           "outdoor_entity": "Current outdoor temperature",
-          "control_mode": "Control mode"
+          "control_mode": "Control mode",
+          "hysteresis_on": "Bootstrap: switch on this many °C below target",
+          "hysteresis_off": "Bootstrap: switch off this many °C above target (0 = at target)"
         }
       },
       "valves": {
@@ -56,6 +61,7 @@
       }
     },
     "error": {
+      "invalid_hysteresis": "Use distances from 0 to 2 °C, not both zero. These thresholds apply only during Hysteresis, not PI.",
       "invalid_pairs": "Select an equal, nonzero number of opening and closing entities.",
       "duplicate_valves": "Each valve entity must be unique.",
       "valve_in_use": "A selected valve already belongs to another SmartPI instance.",

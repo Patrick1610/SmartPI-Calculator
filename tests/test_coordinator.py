@@ -116,3 +116,29 @@ async def test_diagnostics_redact_source_ids(host):
     assert "sensor.room" not in str(result)
     assert "sensor.target" not in str(result)
     assert "sensor.outside" not in str(result)
+
+
+async def test_coordinator_uses_options_margins_and_retains_model_binding(host):
+    from custom_components.smartpi_calculator.const import (
+        CONF_HYSTERESIS_OFF,
+        CONF_HYSTERESIS_ON,
+    )
+
+    _, coordinator = host
+    coordinator.engine.algo.ctl.integral = 1.25
+    saved = coordinator._storage_data()
+    coordinator.store.async_load.return_value = saved
+    coordinator.settings.update({CONF_HYSTERESIS_ON: 0.2, CONF_HYSTERESIS_OFF: 0})
+    await coordinator.initialize()
+    assert coordinator.engine.algo._hyst_on == 0.2
+    assert coordinator.engine.algo._hyst_off == 0
+    assert coordinator.engine.algo.ctl.integral == 1.25
+
+
+async def test_coordinator_rejects_invalid_stored_margins(host):
+    from homeassistant.exceptions import ConfigEntryError
+
+    _, coordinator = host
+    coordinator.settings.update(hysteresis_on=0, hysteresis_off=0)
+    with pytest.raises(ConfigEntryError, match="hysteresis"):
+        await coordinator.initialize()

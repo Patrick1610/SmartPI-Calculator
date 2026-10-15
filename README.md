@@ -4,7 +4,7 @@ An unofficial Home Assistant wrapper around the existing SmartPI mathematical
 core from [KipK/vtherm_smartpi](https://github.com/KipK/vtherm_smartpi).
 No VTherm integration is required. This is not an original or rewritten PI algorithm.
 
-**Experimental release (`0.2.0`).** It computes a heating-demand percentage and can
+**Experimental release (`0.2.1`).** It computes a heating-demand percentage and can
 optionally write explicitly selected valve endpoints. Start with **Learning disabled**.
 
 Repository: [Patrick1610/SmartPI-Calculator](https://github.com/Patrick1610/SmartPI-Calculator).
@@ -14,7 +14,7 @@ Repository: [Patrick1610/SmartPI-Calculator](https://github.com/Patrick1610/Smar
 - Reads **room temperature**, **target temperature**, and **current outdoor temperature**
   from three selected numerical entities. No TRV-temperature dependence.
 - Fixed HEAT mode; periodic updates every 30 seconds, logical bookkeeping cycles of 10 minutes.
-- Publishes **Heating demand**, 0–100%, and five diagnostic sensors.
+- Publishes **Heating demand**, 0–100%, and nine diagnostic sensors.
 - Publishes an unavailable sensor on invalid input; never substitutes a fictitious 0 °C.
 - Saves learned model/PI state with Home Assistant storage and restores it after reload/restart.
 - No climate entity, schedules, target-writing automations, valve curve, or boiler/pump
@@ -26,7 +26,29 @@ retained. Reaching the setpoint is **not** an additional command to shut the out
 In the stable phase, feed-forward and retained integral can maintain a holding demand.
 The original landing governor can also reduce the demand early. During bootstrap, the
 upstream hysteresis may request full output and continue above target. Do not mistake this
-for a thermostat that immediately goes to zero at equality.
+for a thermostat that immediately goes to zero at equality with the default settings.
+
+### Bootstrap hysteresis
+
+Setup and Options expose two per-room configuration fields, not extra number entities:
+
+- **Switch on below target:** a nonnegative distance, default **0.3 °C**.
+- **Switch off above target:** a nonnegative distance, default **0.5 °C**;
+  **0** switches off at the target.
+
+Each distance must be finite and between 0 and 2 °C; both cannot be zero. At a
+20.5 °C target, choosing 0.2 / 0 means ON at or below 20.3 °C and OFF at or above
+20.5 °C. Between the boundaries the previous command is retained. Enter positive
+distances, not signed offsets: the ON distance is subtracted, the OFF distance added.
+These options only affect the upstream **Hysteresis bootstrap phase**, never the stable
+PI deadband, gains, learning quality gates, or a generic cutoff at target.
+
+Existing configurations without these fields keep exactly the old 0.3 / 0.5 defaults.
+Changing these distances preserves the learned-model storage binding; the regular
+safe close/reload behavior still applies when Options are saved. A narrower band can
+shorten useful learning episodes; 0.2 / 0 is a trial setting, not a validated optimum.
+RoomMind/MPC may stop heat independently before a SmartPI threshold is reached. Matching
+a pair of numbers does not synchronize independent controllers or prove heat delivery.
 
 ## Control modes
 
@@ -97,13 +119,32 @@ Home Assistant. Source entity IDs are redacted in that download.
 Five enabled-by-default diagnostic sensors show **Used room temperature**, **Used target
 temperature**, **Used outdoor temperature**, **Control phase** and **Learning status**.
 Temperatures are the actual inputs of the latest successful calculation, stored internally
-in °C and displayed in HA's temperature unit. All six sensors become unavailable together
-when calculation fails. Learning status is `observing`, `paused` or `enabled`; enabled is permission
+in °C and displayed in HA's temperature unit. Learning status is `observing`, `paused` or `enabled`; enabled is permission
 to learn under assumed 1:1 application, not proof that a sample has been accepted. Its
 attributes include accepted heating/cooling sample counts and the feedback assumption.
 Demand attributes also expose the selected control mode and valve status (`starting`,
 `pending`, `failed`, `unavailable`, `confirmed`, or `not_configured`). In direct mode, `enabled` means
 numeric feedback permits learning, not that measured thermal delivery has been confirmed.
+
+Four additional enabled-by-default diagnostic sensors provide directly selectable history:
+
+- **Valve control status:** the last adapter status. Remains readable during calculation
+  failures, so `failed`/`unavailable` are not hidden behind a generic unavailable entity.
+  `confirmed` still means matching numeric endpoints, not measured physical movement.
+- **Accepted heating samples** and **Accepted cooling samples:** the current accepted
+  sample-buffer counts from the core, not every sensor report, elapsed cycles, or unbounded
+  lifetime totals. They can saturate at the core's history limit or fall after a model reset.
+  No accumulating statistics state class is assigned.
+- **Last learning result:** the last reason/result reported by the core, including rejected
+  or extended windows. It is not a live diagnosis of the current blocker and may remain
+  unchanged while learning is disabled. A restart can return it to `init` even if model
+  samples were restored. No estimated reason is substituted.
+
+There are ten sensors per instance. All except Valve control status become unavailable
+when calculation fails. Existing sensor unique IDs and attributes are retained; a/b,
+Kp/Ki, control mode and static metadata remain attributes, not additional entities.
+Normal Recorder retention/exclusions apply; numerical sample counts and text results are
+ordinary history, not automatically long-term statistics.
 The integration is registered as a calculation service, visible under **Devices & services
 → Integrations**, rather than only under Helpers.
 
@@ -115,7 +156,7 @@ that a learned PI model is active or that heat is physically being delivered.
 
 Install through HACS as a **custom repository**: add
 `https://github.com/Patrick1610/SmartPI-Calculator` with type **Integration**, download
-release `v0.2.0`, and restart Home Assistant. Then select **Settings → Devices & services
+release `v0.2.1`, and restart Home Assistant. Then select **Settings → Devices & services
 → Add integration → SmartPI Calculator**. This is not inclusion in HACS's default catalog;
 that requires a separate upstream review. HACS manages files and updates, not room setup.
 
@@ -174,10 +215,14 @@ retries, closing and no writes outside Direct mode. Passing local tests is not a
 heating validation. A source publication does not itself install or connect the output.
 
 Verified locally on 2026-10-15 with Python 3.14.4 / Home Assistant 2026.10.1:
-51 tests pass; Ruff and compileall pass. An isolated temporary HA instance loads the
-actual integration and all six sensors, reports unavailable on invalid input, recovers,
+79 tests pass; Ruff and compileall pass. An isolated temporary HA instance loads the
+actual integration and all ten sensors, reports unavailable on invalid input, recovers,
 restores integral state across reload, and unloads. Configuration tests exercise the
 current HA `probatio` schema API (a core dependency in this baseline).
 A synthetic 24-hour heating/cooling run reaches both bootstrap and stable phases and
 learns heating/cooling samples; this is adapter evidence, not a radiator performance test.
 One dependency warning concerns aiohttp application inheritance, not a failing test.
+The 0.2.1 tests additionally check default/custom bootstrap thresholds (including zero OFF),
+invalid settings, unchanged stable PI output, restored model binding, all ten real HA sensors,
+and diagnostic failure visibility. Publishing this release does not install it or change
+live Home Assistant settings.

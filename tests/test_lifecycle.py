@@ -55,7 +55,7 @@ async def test_real_ha_setup_sensor_unavailable_recovery_and_unload(tmp_path):
                 for s in hass.states.async_all("sensor")
                 if s.entity_id not in ("sensor.room", "sensor.target", "sensor.outside")
             ]
-            assert len(states) == 6
+            assert len(states) == 10
             registry = entity_registry.async_get(hass)
 
             def state(key):
@@ -72,6 +72,13 @@ async def test_real_ha_setup_sensor_unavailable_recovery_and_unload(tmp_path):
             assert float(state("used_outdoor_temperature").state) == 10
             assert state("control_phase").state == "Hysteresis"
             assert state("learning_status").state == "observing"
+            assert state("valve_control_status").state == "not_configured"
+            assert state("learned_heating_samples").state == "0"
+            assert state("learned_cooling_samples").state == "0"
+            assert (
+                state("last_learning_result").state
+                == entry.runtime_data.engine.algo.learn_last_reason
+            )
             assert (
                 state("learning_status").attributes["feedback"] == "virtual_not_applied"
             )
@@ -80,7 +87,12 @@ async def test_real_ha_setup_sensor_unavailable_recovery_and_unload(tmp_path):
             await hass.async_block_till_done()
             assert hass.states.get(entity_id).state == "unavailable"
             for previous in states:
-                assert hass.states.get(previous.entity_id).state == "unavailable"
+                expected = (
+                    "not_configured"
+                    if previous.entity_id == state("valve_control_status").entity_id
+                    else "unavailable"
+                )
+                assert hass.states.get(previous.entity_id).state == expected
             hass.states.async_set("sensor.room", "19", {"unit_of_measurement": "°C"})
             await entry.runtime_data.async_refresh()
             await hass.async_block_till_done()
