@@ -1,4 +1,4 @@
-"""Small sensor-only runtime around the unchanged SmartPI control law.
+"""Small runtime around the unchanged SmartPI control law.
 
 Logical cycles only maintain the core's timing/ownership bookkeeping. They never
 start a PWM device or call a Home Assistant service.
@@ -54,6 +54,17 @@ class Calculator:
         self._command_integral = 0.0
         self._last_temperature: float | None = None
         self._interrupted = False
+        self._feedback = "assumed_1_to_1" if output_applied else "virtual_not_applied"
+        self._cycle_learning_valid = output_applied
+
+    def set_feedback(self, confirmed):
+        """Discard uncertain cycles before allowing further model learning."""
+        if not confirmed:
+            self.algo.set_learning_enabled(False)
+            self._cycle_learning_valid = False
+        else:
+            self.algo.set_learning_enabled(True)
+        self._feedback = "confirmed_number_values" if confirmed else "unconfirmed"
 
     def interrupt(self):
         """Missing inputs are unknown, never fictitious temperatures or zero output."""
@@ -71,8 +82,9 @@ class Calculator:
         self._command_integral = 0.0
         self._command = 0.0
         self._interrupted = True
+        self._cycle_learning_valid = False
 
-    async def step(self, inputs: Inputs) -> float:
+    async def step(self, inputs: Inputs, *, command_transform=None) -> float:
         now = time.monotonic()
         if self._last_tick is not None and now - self._last_tick > 3 * SAMPLE_SECONDS:
             self.interrupt()
@@ -87,11 +99,15 @@ class Calculator:
         )
         if boundary and self._cycle_start is not None:
             duration = now - self._cycle_start
+            learning = self.algo.learning_enabled
+            if not self._cycle_learning_valid:
+                self.algo.set_learning_enabled(False)
             await self.algo.on_cycle_completed(
                 e_eff=self._command_integral / duration,
                 elapsed_ratio=duration / (CYCLE_MINUTES * 60),
                 cycle_duration_min=CYCLE_MINUTES,
             )
+            self.algo.set_learning_enabled(learning)
 
         slope = None
         if elapsed > 0 and self._last_temperature is not None:
@@ -110,6 +126,9 @@ class Calculator:
             self.interrupt()
             raise ValueError("SmartPI produced invalid demand")
 
+        if command_transform is not None:
+            command = command_transform(command * 100) / 100
+
         projection = project_cycle_command(command, CYCLE_MINUTES, 0, 0)
         self.algo.stage_valve_command(
             projection,
@@ -117,6 +136,7 @@ class Calculator:
             expected_actuator_power=command,
         )
         if boundary:
+            self._cycle_learning_valid = self.algo.learning_enabled
             await self.algo.on_cycle_started(
                 projection.on_time_sec,
                 projection.off_time_sec,
@@ -143,10 +163,8 @@ class Calculator:
     def diagnostics(self) -> dict:
         return {
             "phase": self.algo.phase.value,
-            "learning_enabled": self.output_applied,
-            "feedback": "assumed_1_to_1"
-            if self.output_applied
-            else "virtual_not_applied",
+            "learning_enabled": self.algo.learning_enabled,
+            "feedback": self._feedback,
             "kp": self.algo.kp,
             "ki": self.algo.ki,
             "thermal_gain": self.algo.a,

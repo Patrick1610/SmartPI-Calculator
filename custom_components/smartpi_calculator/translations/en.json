@@ -1,16 +1,70 @@
 {
   "title": "SmartPI Calculator",
   "config": {
-    "step": {"user": {
-      "title": "Standalone SmartPI calculator",
-      "description": "Only calculates a heating demand, 0–100%. Never controls devices. Learning starts disabled until you confirm external 1:1 application in Options.",
-      "data": {"name": "Name", "temperature_entity": "Room temperature", "target_entity": "Target temperature", "outdoor_entity": "Current outdoor temperature"}
-    }},
-    "abort": {"already_configured": "A calculator for this room temperature source already exists."}
+    "step": {
+      "user": {
+        "title": "Configure SmartPI Calculator",
+        "description": "Direct valve control writes valve values and learns with confirmed application. Manual external control learns assuming you apply the output externally 1:1. Learning disabled only calculates: no writes or learning.",
+        "data": {
+          "name": "Name",
+          "temperature_entity": "Room temperature",
+          "target_entity": "Target temperature",
+          "outdoor_entity": "Current outdoor temperature",
+          "control_mode": "Control mode"
+        }
+      },
+      "valves": {
+        "title": "Direct valve control",
+        "description": "Select existing opening and closing number entities in matching order and equal counts. For example 40% becomes opening 40 / closing 60. Disable native Adaptive Mode and other writers of these valve values. RoomMind remains the target source.",
+        "data": {
+          "opening_entities": "Opening entities",
+          "closing_entities": "Closing entities"
+        }
+      }
+    },
+    "error": {
+      "invalid_pairs": "Select an equal, nonzero number of opening and closing entities.",
+      "duplicate_valves": "Each valve entity must be unique.",
+      "valve_in_use": "A selected valve already belongs to another SmartPI instance.",
+      "valve_is_source": "A valve output cannot also be a temperature or target source.",
+      "invalid_valve": "Select existing number entities.",
+      "invalid_valve_range": "Valves must support 0–100 with a compatible step size."
+    },
+    "abort": {
+      "already_configured": "A calculator for this room temperature source already exists."
+    }
   },
-  "options": {"step": {"init": {
-    "title": "Sources and learning",
-    "description": "Enable learning only when the published demand is actually applied externally 1:1. Boiler outages and external suppression are not detected. There is no pump-overrun protection.",
-    "data": {"temperature_entity": "Room temperature", "target_entity": "Target temperature", "outdoor_entity": "Current outdoor temperature", "output_applied": "Demand is applied externally 1:1 — enable learning"}
-  }}}
+  "options": {
+    "step": {
+      "init": {
+        "title": "Sources and control mode",
+        "description": "Direct valve control writes valve values and learns with confirmed application. Manual external control learns assuming you apply the output externally 1:1. Learning disabled only calculates: no writes or learning.",
+        "data": {
+          "temperature_entity": "Room temperature",
+          "target_entity": "Target temperature",
+          "outdoor_entity": "Current outdoor temperature",
+          "control_mode": "Control mode"
+        }
+      },
+      "valves": {
+        "title": "Direct valve control",
+        "description": "Select existing opening and closing number entities in matching order and equal counts. For example 40% becomes opening 40 / closing 60. Disable native Adaptive Mode and other writers of these valve values. RoomMind remains the target source.",
+        "data": {
+          "opening_entities": "Opening entities",
+          "closing_entities": "Closing entities"
+        }
+      }
+    },
+    "error": {
+      "invalid_pairs": "Select an equal, nonzero number of opening and closing entities.",
+      "duplicate_valves": "Each valve entity must be unique.",
+      "valve_in_use": "A selected valve already belongs to another SmartPI instance.",
+      "valve_is_source": "A valve output cannot also be a temperature or target source.",
+      "invalid_valve": "Select existing number entities.",
+      "invalid_valve_range": "Valves must support 0–100 with a compatible step size."
+    },
+    "abort": {
+      "already_configured": "This room temperature source is already in use."
+    }
+  }
 }

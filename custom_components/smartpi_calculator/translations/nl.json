@@ -1,16 +1,70 @@
 {
   "title": "SmartPI Calculator",
   "config": {
-    "step": {"user": {
-      "title": "Zelfstandige SmartPI-rekenaar",
-      "description": "Berekent uitsluitend een warmtevraag van 0–100%. Stuurt geen apparaten aan. Zelfleren staat eerst uit; schakel dit via Opties in zodra de uitgang werkelijk 1-op-1 wordt toegepast.",
-      "data": {"name": "Naam", "temperature_entity": "Kamertemperatuur", "target_entity": "Doeltemperatuur", "outdoor_entity": "Actuele buitentemperatuur"}
-    }},
-    "abort": {"already_configured": "Er bestaat al een rekenaar voor deze kamertemperatuurbron."}
+    "step": {
+      "user": {
+        "title": "SmartPI Calculator instellen",
+        "description": "Direct valve control schrijft de klepwaarden en leert bij bevestigde toepassing. Manual external control leert op jouw verklaring dat de uitgang extern 1-op-1 wordt toegepast. Learning disabled rekent alleen; geen aansturing of leren.",
+        "data": {
+          "name": "Naam",
+          "temperature_entity": "Kamertemperatuur",
+          "target_entity": "Doeltemperatuur",
+          "outdoor_entity": "Actuele buitentemperatuur",
+          "control_mode": "Regelmodus"
+        }
+      },
+      "valves": {
+        "title": "Directe klepaansturing",
+        "description": "Selecteer bestaande number-entiteiten voor opening en closing, in dezelfde volgorde en met evenveel items. Bijvoorbeeld 40% wordt opening 40 / closing 60. Zet de interne Adaptive Mode uit; laat geen andere regeling deze klepwaarden schrijven. RoomMind blijft alleen de doelbron.",
+        "data": {
+          "opening_entities": "Opening-entiteiten",
+          "closing_entities": "Closing-entiteiten"
+        }
+      }
+    },
+    "error": {
+      "invalid_pairs": "Selecteer evenveel opening- en closing-entiteiten; minimaal één paar.",
+      "duplicate_valves": "Een klepentiteit mag maar één keer voorkomen.",
+      "valve_in_use": "Een geselecteerde klep is al gekoppeld aan een andere SmartPI-instantie.",
+      "valve_is_source": "Een klepuitgang mag niet tegelijk een temperatuur- of doelbron zijn.",
+      "invalid_valve": "Selecteer bestaande number-entiteiten.",
+      "invalid_valve_range": "Kleppen moeten een bereik van 0–100 hebben en een passende stapgrootte."
+    },
+    "abort": {
+      "already_configured": "Er bestaat al een rekenaar voor deze kamertemperatuurbron."
+    }
   },
-  "options": {"step": {"init": {
-    "title": "Bronnen en zelfleren",
-    "description": "Schakel zelfleren alleen in als de berekende uitgang extern werkelijk 1-op-1 wordt toegepast. Keteluitval en externe onderdrukking worden niet gedetecteerd. Deze rekenaar regelt geen pompnaloop.",
-    "data": {"temperature_entity": "Kamertemperatuur", "target_entity": "Doeltemperatuur", "outdoor_entity": "Actuele buitentemperatuur", "output_applied": "Uitgang wordt extern 1-op-1 toegepast — zelfleren inschakelen"}
-  }}}
+  "options": {
+    "step": {
+      "init": {
+        "title": "Bronnen en regelmodus",
+        "description": "Direct valve control schrijft de klepwaarden en leert bij bevestigde toepassing. Manual external control leert op jouw verklaring dat de uitgang extern 1-op-1 wordt toegepast. Learning disabled rekent alleen; geen aansturing of leren.",
+        "data": {
+          "temperature_entity": "Kamertemperatuur",
+          "target_entity": "Doeltemperatuur",
+          "outdoor_entity": "Actuele buitentemperatuur",
+          "control_mode": "Regelmodus"
+        }
+      },
+      "valves": {
+        "title": "Directe klepaansturing",
+        "description": "Selecteer bestaande number-entiteiten voor opening en closing, in dezelfde volgorde en met evenveel items. Bijvoorbeeld 40% wordt opening 40 / closing 60. Zet de interne Adaptive Mode uit; laat geen andere regeling deze klepwaarden schrijven. RoomMind blijft alleen de doelbron.",
+        "data": {
+          "opening_entities": "Opening-entiteiten",
+          "closing_entities": "Closing-entiteiten"
+        }
+      }
+    },
+    "error": {
+      "invalid_pairs": "Selecteer evenveel opening- en closing-entiteiten; minimaal één paar.",
+      "duplicate_valves": "Een klepentiteit mag maar één keer voorkomen.",
+      "valve_in_use": "Een geselecteerde klep is al gekoppeld aan een andere SmartPI-instantie.",
+      "valve_is_source": "Een klepuitgang mag niet tegelijk een temperatuur- of doelbron zijn.",
+      "invalid_valve": "Selecteer bestaande number-entiteiten.",
+      "invalid_valve_range": "Kleppen moeten een bereik van 0–100 hebben en een passende stapgrootte."
+    },
+    "abort": {
+      "already_configured": "Deze kamertemperatuurbron is al in gebruik."
+    }
+  }
 }

@@ -153,7 +153,7 @@ async def test_learning_path_with_synthetic_heating_and_cooling(clock):
     assert bound_seen
 
 
-def test_no_actuator_or_vtherm_integration_dependencies():
+def test_only_optional_adapter_can_write_number_entities():
     component = ROOT / "custom_components/smartpi_calculator"
     for path in component.rglob("*.py"):
         tree = ast.parse(path.read_text())
@@ -164,10 +164,11 @@ def test_no_actuator_or_vtherm_integration_dependencies():
                 ), path
             if isinstance(node, ast.Attribute):
                 assert node.attr not in (
-                    "async_call",
                     "async_set_native_value",
                     "async_set_temperature",
                 ), path
+                if node.attr == "async_call":
+                    assert path.name == "valve.py", path
     manifest = json.loads((component / "manifest.json").read_text())
     assert not manifest.get("dependencies")
     assert not manifest["requirements"]

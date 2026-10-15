@@ -8,7 +8,11 @@ from homeassistant.config_entries import ConfigEntries, ConfigEntry, ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry, entity_registry, frame
 
-from custom_components.smartpi_calculator.const import DOMAIN
+from custom_components.smartpi_calculator.const import (
+    DOMAIN,
+    MODE_DISABLED,
+    MODE_EXTERNAL,
+)
 
 
 async def test_real_ha_setup_sensor_unavailable_recovery_and_unload(tmp_path):
@@ -87,16 +91,25 @@ async def test_real_ha_setup_sensor_unavailable_recovery_and_unload(tmp_path):
             await entry.runtime_data.async_refresh()
             await hass.async_block_till_done()
             assert float(state("used_target_temperature").state) == 21
-            entry.runtime_data.engine.output_applied = True
+            entry.runtime_data.mode = MODE_EXTERNAL
             entry.runtime_data.async_set_updated_data(entry.runtime_data.data)
             await hass.async_block_till_done()
             assert state("learning_status").state == "enabled"
-            entry.runtime_data.engine.output_applied = False
+            entry.runtime_data.mode = MODE_DISABLED
             entry.runtime_data.engine.algo.ctl.integral = 1.25
+            devices = device_registry.async_get(hass)
+            device = devices.async_get_device_by_identifier(
+                (DOMAIN, entry.entry_id), entry.entry_id
+            )
+            devices.async_update_device(
+                device.id,
+                manufacturer="Unofficial derivative of KipK / gael1980 SmartPI",
+            )
             assert await hass.config_entries.async_reload(entry.entry_id)
             await hass.async_block_till_done()
             assert entry.runtime_data.engine.algo.ctl.integral == 1.25
             assert not entry.runtime_data.engine.algo.learning_enabled
+            assert devices.async_get(device.id).manufacturer is None
             assert await hass.config_entries.async_unload(entry.entry_id)
     finally:
         await hass.async_stop()

@@ -9,7 +9,7 @@ from homeassistant.const import UnitOfTemperature
 from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, UPSTREAM_COMMIT
+from .const import DOMAIN, MODE_DIRECT, MODE_EXTERNAL, UPSTREAM_COMMIT
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -35,8 +35,7 @@ class CalculatorSensor(CoordinatorEntity, SensorEntity):
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, entry.entry_id)},
             name=entry.title,
-            manufacturer="Unofficial derivative of KipK / gael1980 SmartPI",
-            model="Standalone calculator (no actuator control)",
+            model="SmartPI Calculator",
         )
 
 
@@ -57,8 +56,12 @@ class DemandSensor(CalculatorSensor):
     @property
     def extra_state_attributes(self):
         return {
-            **self.coordinator.engine.diagnostics(),
+            **self.coordinator.model_diagnostics(),
             "upstream_commit": UPSTREAM_COMMIT,
+            "control_mode": self.coordinator.mode,
+            "valve_status": self.coordinator.valves.status
+            if self.coordinator.valves
+            else "not_configured",
             "input_temperatures_c": None
             if self.coordinator.inputs is None
             else {
@@ -111,7 +114,7 @@ class LearningStatusSensor(CalculatorSensor):
 
     _attr_name = "Learning status"
     _attr_device_class = SensorDeviceClass.ENUM
-    _attr_options = ["observing", "enabled"]
+    _attr_options = ["observing", "enabled", "paused"]
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:school"
 
@@ -120,11 +123,20 @@ class LearningStatusSensor(CalculatorSensor):
 
     @property
     def native_value(self):
-        return "enabled" if self.coordinator.engine.output_applied else "observing"
+        if self.coordinator.mode == MODE_EXTERNAL:
+            return "enabled"
+        if self.coordinator.mode == MODE_DIRECT:
+            return (
+                "enabled"
+                if self.coordinator.engine.algo.learning_enabled
+                and self.coordinator.valves.confirmed()
+                else "paused"
+            )
+        return "observing"
 
     @property
     def extra_state_attributes(self):
-        diagnostics = self.coordinator.engine.diagnostics()
+        diagnostics = self.coordinator.model_diagnostics()
         return {
             key: diagnostics[key]
             for key in (

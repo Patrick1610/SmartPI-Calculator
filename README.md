@@ -1,11 +1,11 @@
 # SmartPI Calculator
 
-An unofficial, sensor-only Home Assistant wrapper around the existing SmartPI mathematical
+An unofficial Home Assistant wrapper around the existing SmartPI mathematical
 core from [KipK/vtherm_smartpi](https://github.com/KipK/vtherm_smartpi).
 No VTherm integration is required. This is not an original or rewritten PI algorithm.
 
-**Experimental release (`0.1.0`).** It computes a heating-demand percentage;
-it does not control your heating system. Start in observation mode.
+**Experimental release (`0.2.0`).** It computes a heating-demand percentage and can
+optionally write explicitly selected valve endpoints. Start with **Learning disabled**.
 
 Repository: [Patrick1610/SmartPI-Calculator](https://github.com/Patrick1610/SmartPI-Calculator).
 
@@ -17,8 +17,9 @@ Repository: [Patrick1610/SmartPI-Calculator](https://github.com/Patrick1610/Smar
 - Publishes **Heating demand**, 0–100%, and five diagnostic sensors.
 - Publishes an unavailable sensor on invalid input; never substitutes a fictitious 0 °C.
 - Saves learned model/PI state with Home Assistant storage and restores it after reload/restart.
-- No climate entity, device writes, service calls, schedules, target-writing automations,
-  valve curve, or boiler/pump control. Nothing is installed into an existing HA automatically.
+- No climate entity, schedules, target-writing automations, valve curve, or boiler/pump
+  control. Only Direct valve control writes `number.set_value` to selected endpoints.
+  Nothing is installed into an existing HA automatically.
 
 The original control law, bootstrap, deadband, integral management and learning rules are
 retained. Reaching the setpoint is **not** an additional command to shut the output off.
@@ -27,16 +28,25 @@ The original landing governor can also reduce the demand early. During bootstrap
 upstream hysteresis may request full output and continue above target. Do not mistake this
 for a thermostat that immediately goes to zero at equality.
 
-## Learning versus observing
+## Control modes
 
-Initially, learning is **off**. You can inspect the computed demand without claiming it
-has heated the room. With an empty model, this remains the upstream bootstrap calculation;
-it will not magically learn a stable model while its demand is not being applied.
+Setup and Options contain one exclusive mode choice:
 
-In integration **Options**, enable “Demand is applied externally 1:1” only after arranging
-the external application yourself. The host then retains the previous published command
-as the assumed applied command, including its time-weighted history. This is an explicit
-assumption, not measured power or a physical delivery acknowledgement. We do not equate
+- **Learning disabled** (default): calculate and publish; no valve writes or learning.
+- **Manual external control**: calculate and learn under your explicit assertion that an
+  external controller applies the output 1:1. SmartPI itself writes nothing.
+- **Direct valve control**: calculate and write complementary opening/closing values;
+  pause learning until every selected number entity echoes the requested values.
+
+There is no separate “Demand is applied” checkbox. Existing 0.1.0 configurations migrate
+to Learning disabled unless that old checkbox was enabled, in which case they migrate to
+Manual external control. Migration never selects Direct valve control or attaches valves.
+With an empty model and learning disabled, the output remains the upstream bootstrap
+calculation; merely observing cannot train a stable model.
+
+The host retains the previous command and its time-weighted history. This is a simplified
+application assumption, not measured power or a physical delivery acknowledgement. Numeric
+echoes can themselves be optimistic or delayed by the underlying integration. We do not equate
 40% valve command with 40% thermal watts. Variable supply-water temperature, hydraulic
 competition, lost commands or a boiler outage can violate the simplified thermal model.
 Emma's global demand is neither a room-power input nor a supply-temperature correction.
@@ -45,6 +55,34 @@ No extra `room >= target -> 0` rule, positive-delta-only learning gate or pump-o
 has been invented. Cooling observations with zero command are needed for heat-loss learning.
 Minimum hydraulic flow and boiler pump overrun are outside this integration's scope.
 Confirm installation suitability before actuator use.
+
+### Optional direct valve control
+
+Only this mode opens a second setup page. It has two multi-entity fields: opening numbers
+and closing numbers. Select equal-length lists in matching order. Each number must support
+0–100; targets must be unique and cannot belong to another direct SmartPI instance.
+Disable the TRV's native Adaptive mode and remove competing endpoint writers first.
+For Sonoff-style complementary endpoints, output `u` requests opening `u`, closing `100-u`.
+Both endpoints are rounded onto a common supported step. These values are limits/commands,
+not measured physical positions. Other actuator semantics are not supported.
+
+Calculation runs every 30 seconds; ordinary writes and retries are limited to once per
+endpoint per 60 seconds, with a five-second timeout per call. Unconfirmed commands remain
+pending and retry; they do not create a permanent command-fault latch. While an ordinary
+candidate is rate-limited, the published/applied command stays at the previous command;
+the suppressed candidate is not committed as though it had been sent. Feedback is checked
+before each learning step, allowing normal echoes that arrive after the service returns.
+Uncertain cycles are excluded from learning without resetting the control loop. A new zero/stop
+command bypasses the normal interval. Missing temperature inputs or an unavailable valve
+pause learning and request closing of reachable endpoints. Unload, mode change and normal
+HA shutdown also request closing. An unreachable device or power failure cannot be made
+physically safe by software; numeric acknowledgements never prove that a valve closed.
+
+RoomMind can remain the numeric target source. This adapter changes neither RoomMind nor
+TRV climate targets/HVAC modes, ClimateSync sources, or boiler control. Check compatibility:
+if your boiler-demand path stops heat while SmartPI retains a holding command, heat delivery
+no longer matches the simplified model. This integration does not automatically reconcile
+independent controllers. Keep an appropriate hydraulic bypass/pump-overrun arrangement.
 
 ## Output and diagnostics
 
@@ -60,9 +98,12 @@ Five enabled-by-default diagnostic sensors show **Used room temperature**, **Use
 temperature**, **Used outdoor temperature**, **Control phase** and **Learning status**.
 Temperatures are the actual inputs of the latest successful calculation, stored internally
 in °C and displayed in HA's temperature unit. All six sensors become unavailable together
-when calculation fails. Learning status is `observing` or `enabled`; enabled is permission
+when calculation fails. Learning status is `observing`, `paused` or `enabled`; enabled is permission
 to learn under assumed 1:1 application, not proof that a sample has been accepted. Its
 attributes include accepted heating/cooling sample counts and the feedback assumption.
+Demand attributes also expose the selected control mode and valve status (`starting`,
+`pending`, `failed`, `unavailable`, `confirmed`, or `not_configured`). In direct mode, `enabled` means
+numeric feedback permits learning, not that measured thermal delivery has been confirmed.
 The integration is registered as a calculation service, visible under **Devices & services
 → Integrations**, rather than only under Helpers.
 
@@ -74,7 +115,7 @@ that a learned PI model is active or that heat is physically being delivered.
 
 Install through HACS as a **custom repository**: add
 `https://github.com/Patrick1610/SmartPI-Calculator` with type **Integration**, download
-release `v0.1.0`, and restart Home Assistant. Then select **Settings → Devices & services
+release `v0.2.0`, and restart Home Assistant. Then select **Settings → Devices & services
 → Add integration → SmartPI Calculator**. This is not inclusion in HACS's default catalog;
 that requires a separate upstream review. HACS manages files and updates, not room setup.
 
@@ -94,8 +135,9 @@ Example sources (select the corresponding entities in your own installation):
 - Outside: `sensor.outdoor_temperature`, **not an adaptive running mean**.
 
 The output entity ID is assigned by Home Assistant from the chosen device name. No output
-consumer, RoomMind change, TRV change or ClimateSync change is created. Source changes are
-available through Options. Changing the room/outside source resets the restored model binding.
+consumer is created in Learning disabled or Manual external control. RoomMind and ClimateSync
+configuration are never changed. Source/mode changes are available through Options. Changing
+the room/outside source, mode, or valve binding resets the restored model binding.
 
 ## Provenance and maintenance
 
@@ -126,12 +168,13 @@ python3 -m venv .venv
 ```
 
 The tests check runtime ownership and numerical behavior, including a holding demand at
-the setpoint, bootstrap hysteresis, invalid inputs, reload persistence and absence of
-actuator-service calls. Passing local tests is not a live HA installation or physical
+the setpoint, bootstrap hysteresis, invalid inputs, reload persistence, exclusive mode
+migration, supported-step complementary writes, partial/unavailable feedback, rate-limited
+retries, closing and no writes outside Direct mode. Passing local tests is not a physical
 heating validation. A source publication does not itself install or connect the output.
 
 Verified locally on 2026-10-15 with Python 3.14.4 / Home Assistant 2026.10.1:
-33 tests pass, Ruff and compileall pass. An isolated temporary HA instance loads the
+51 tests pass; Ruff and compileall pass. An isolated temporary HA instance loads the
 actual integration and all six sensors, reports unavailable on invalid input, recovers,
 restores integral state across reload, and unloads. Configuration tests exercise the
 current HA `probatio` schema API (a core dependency in this baseline).

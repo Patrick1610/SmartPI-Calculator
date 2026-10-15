@@ -2,26 +2,33 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 from datetime import timedelta
 
 from homeassistant.const import UnitOfTemperature
+from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util.unit_conversion import TemperatureConverter
 
 from .const import (
+    CONF_CLOSING,
+    CONF_OPENING,
     CONF_OUTDOOR,
-    CONF_OUTPUT_APPLIED,
     CONF_TARGET,
     CONF_TEMPERATURE,
     DOMAIN,
+    MODE_DIRECT,
+    MODE_EXTERNAL,
     SAMPLE_SECONDS,
     SOURCE_KEYS,
     UPSTREAM_COMMIT,
+    control_mode,
 )
 from .engine import Calculator, Inputs
+from .valve import ValveController, valve_bindings
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -40,21 +47,46 @@ class CalculatorCoordinator(DataUpdateCoordinator[float]):
         self.store = Store(hass, 1, f"{DOMAIN}.{entry.entry_id}")
         self.engine: Calculator | None = None
         self.inputs: Inputs | None = None
+        self.mode = control_mode(self.settings)
+        self.valves = None
+        self._control_lock = asyncio.Lock()
+        self._stopping = False
 
     async def initialize(self):
         saved = await self.store.async_load()
         binding = [self.settings[k] for k in (CONF_TEMPERATURE, CONF_OUTDOOR)]
         state = (
             saved.get("algorithm")
-            if isinstance(saved, dict) and saved.get("sources") == binding
+            if isinstance(saved, dict)
+            and saved.get("sources") == binding
+            and saved.get(
+                "application",
+                self._application_binding() if self.mode != MODE_DIRECT else None,
+            )
+            == self._application_binding()
             else None
         )
         self.engine = Calculator(
             self.hass,
             self.entry.title,
-            output_applied=self.settings.get(CONF_OUTPUT_APPLIED, False),
+            output_applied=self.mode == MODE_EXTERNAL,
             saved_state=state,
         )
+        if self.mode == MODE_DIRECT:
+            try:
+                pairs, step = valve_bindings(
+                    self.hass, self.settings, exclude_entry=self.entry.entry_id
+                )
+            except ValueError as err:
+                if str(err) in ("invalid_valve", "invalid_valve_range") and any(
+                    self.hass.states.get(entity) is None
+                    or self.hass.states.get(entity).state in ("unavailable", "unknown")
+                    for key in (CONF_OPENING, CONF_CLOSING)
+                    for entity in self.settings.get(key, [])
+                ):
+                    raise ConfigEntryNotReady("Valve entities are not ready") from err
+                raise ConfigEntryError(str(err)) from err
+            self.valves = ValveController(self.hass, pairs, step)
 
     def _read_temperature(self, key):
         state = self.hass.states.get(self.settings[key])
@@ -72,17 +104,37 @@ class CalculatorCoordinator(DataUpdateCoordinator[float]):
         return value, state.last_updated
 
     async def _async_update_data(self):
+        async with self._control_lock:
+            if self._stopping:
+                raise UpdateFailed("SmartPI is stopping")
+            return await self._calculate()
+
+    async def _calculate(self):
         try:
             room, measure_id = self._read_temperature(CONF_TEMPERATURE)
             target, _ = self._read_temperature(CONF_TARGET)
             outdoor, _ = self._read_temperature(CONF_OUTDOOR)
             self.inputs = Inputs(room, target, outdoor, measure_id)
-            value = await self.engine.step(self.inputs)
+            if self.valves is None:
+                value = await self.engine.step(self.inputs)
+            else:
+                self.engine.set_feedback(self.valves.confirmed())
+                value = await self.engine.step(
+                    self.inputs, command_transform=self.valves.prepare
+                )
+                await self.valves.apply(value)
+                # A service may return before its state echo. No learning step
+                # runs after this write; check the echo before the next step.
+                if self.valves.status in ("failed", "unavailable"):
+                    self.engine.set_feedback(False)
         except Exception as err:
             # The HA coordinator exposes failures as unavailable. Also invalidate
             # our partial cycle after unexpected core errors, not just bad inputs.
             self.inputs = None
             self.engine.interrupt()
+            if self.valves is not None:
+                self.engine.set_feedback(False)
+                await self.valves.close()
             raise UpdateFailed(str(err)) from err
         self.store.async_delay_save(self._storage_data, 60)
         return value
@@ -91,12 +143,38 @@ class CalculatorCoordinator(DataUpdateCoordinator[float]):
         return {
             "sources": [self.settings[k] for k in (CONF_TEMPERATURE, CONF_OUTDOOR)],
             "upstream_commit": UPSTREAM_COMMIT,
+            "application": self._application_binding(),
             "algorithm": self.engine.snapshot(),
         }
+
+    def _application_binding(self):
+        return [
+            self.mode,
+            self.settings.get(CONF_OPENING, []),
+            self.settings.get(CONF_CLOSING, []),
+        ]
+
+    def model_diagnostics(self):
+        data = self.engine.diagnostics()
+        if self.valves is not None and not self.valves.confirmed():
+            data.update(learning_enabled=False, feedback="awaiting_number_values")
+        return data
 
     async def save(self):
         if self.engine is not None:
             await self.store.async_save(self._storage_data())
+
+    async def shutdown(self):
+        self._stopping = True
+        await self.async_shutdown()
+        async with self._control_lock:
+            if self.valves is not None:
+                self.engine.set_feedback(False)
+                if not await self.valves.close(terminal=True):
+                    _LOGGER.warning(
+                        "%s: final valve close is not confirmed", self.entry.title
+                    )
+            await self.save()
 
     @property
     def source_entities(self):
