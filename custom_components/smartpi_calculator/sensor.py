@@ -1,18 +1,46 @@
 """A numerical demand sensor, not a climate or actuator entity."""
 
-from homeassistant.components.sensor import SensorEntity, SensorStateClass
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
+from homeassistant.const import UnitOfTemperature
+from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, UPSTREAM_COMMIT
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
-    async_add_entities([DemandSensor(entry)])
+    async_add_entities(
+        [
+            DemandSensor(entry),
+            *[
+                InputTemperatureSensor(entry, key)
+                for key in ("room", "target", "outdoor")
+            ],
+            PhaseSensor(entry),
+            LearningStatusSensor(entry),
+        ]
+    )
 
 
-class DemandSensor(CoordinatorEntity, SensorEntity):
+class CalculatorSensor(CoordinatorEntity, SensorEntity):
     _attr_has_entity_name = True
+
+    def __init__(self, entry, key):
+        super().__init__(entry.runtime_data)
+        self._attr_unique_id = f"{entry.entry_id}_{key}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, entry.entry_id)},
+            name=entry.title,
+            manufacturer="Unofficial derivative of KipK / gael1980 SmartPI",
+            model="Standalone calculator (no actuator control)",
+        )
+
+
+class DemandSensor(CalculatorSensor):
     _attr_name = "Heating demand"
     _attr_native_unit_of_measurement = "%"
     _attr_state_class = SensorStateClass.MEASUREMENT
@@ -20,14 +48,7 @@ class DemandSensor(CoordinatorEntity, SensorEntity):
     _attr_icon = "mdi:chart-bell-curve-cumulative"
 
     def __init__(self, entry):
-        super().__init__(entry.runtime_data)
-        self._attr_unique_id = f"{entry.entry_id}_demand"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.title,
-            manufacturer="Unofficial derivative of KipK / gael1980 SmartPI",
-            model="Standalone calculator (no actuator control)",
-        )
+        super().__init__(entry, "demand")
 
     @property
     def native_value(self):
@@ -45,4 +66,70 @@ class DemandSensor(CoordinatorEntity, SensorEntity):
                 "target": self.coordinator.inputs.target,
                 "outdoor": self.coordinator.inputs.outdoor,
             },
+        }
+
+
+class InputTemperatureSensor(CalculatorSensor):
+    """The successful calculation's input, not an independently reread source."""
+
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 2
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, entry, key):
+        super().__init__(entry, f"used_{key}_temperature")
+        self._key = {"room": "temperature", "target": "target", "outdoor": "outdoor"}[
+            key
+        ]
+        self._attr_name = f"Used {key} temperature"
+
+    @property
+    def native_value(self):
+        inputs = self.coordinator.inputs
+        return None if inputs is None else getattr(inputs, self._key)
+
+
+class PhaseSensor(CalculatorSensor):
+    _attr_name = "Control phase"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = ["Hysteresis", "Stable", "Calibration"]
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:state-machine"
+
+    def __init__(self, entry):
+        super().__init__(entry, "control_phase")
+
+    @property
+    def native_value(self):
+        return self.coordinator.engine.diagnostics()["phase"]
+
+
+class LearningStatusSensor(CalculatorSensor):
+    """Enabled means permission to learn, not proof of accepted samples."""
+
+    _attr_name = "Learning status"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = ["observing", "enabled"]
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:school"
+
+    def __init__(self, entry):
+        super().__init__(entry, "learning_status")
+
+    @property
+    def native_value(self):
+        return "enabled" if self.coordinator.engine.output_applied else "observing"
+
+    @property
+    def extra_state_attributes(self):
+        diagnostics = self.coordinator.engine.diagnostics()
+        return {
+            key: diagnostics[key]
+            for key in (
+                "feedback",
+                "learned_heating_samples",
+                "learned_cooling_samples",
+            )
         }

@@ -51,17 +51,47 @@ async def test_real_ha_setup_sensor_unavailable_recovery_and_unload(tmp_path):
                 for s in hass.states.async_all("sensor")
                 if s.entity_id not in ("sensor.room", "sensor.target", "sensor.outside")
             ]
-            assert len(states) == 1
-            entity_id = states[0].entity_id
-            assert float(states[0].state) == 100
+            assert len(states) == 6
+            registry = entity_registry.async_get(hass)
+
+            def state(key):
+                return hass.states.get(
+                    registry.async_get_entity_id(
+                        "sensor", DOMAIN, f"{entry.entry_id}_{key}"
+                    )
+                )
+
+            entity_id = state("demand").entity_id
+            assert float(state("demand").state) == 100
+            assert float(state("used_room_temperature").state) == 19
+            assert float(state("used_target_temperature").state) == 20
+            assert float(state("used_outdoor_temperature").state) == 10
+            assert state("control_phase").state == "Hysteresis"
+            assert state("learning_status").state == "observing"
+            assert (
+                state("learning_status").attributes["feedback"] == "virtual_not_applied"
+            )
             hass.states.async_set("sensor.room", "unavailable")
             await entry.runtime_data.async_refresh()
             await hass.async_block_till_done()
             assert hass.states.get(entity_id).state == "unavailable"
+            for previous in states:
+                assert hass.states.get(previous.entity_id).state == "unavailable"
             hass.states.async_set("sensor.room", "19", {"unit_of_measurement": "°C"})
             await entry.runtime_data.async_refresh()
             await hass.async_block_till_done()
             assert float(hass.states.get(entity_id).state) == 100
+            assert state("learning_status").state == "observing"
+            # Input entities reflect the same latest successful calculation.
+            hass.states.async_set("sensor.target", "21", {"unit_of_measurement": "°C"})
+            await entry.runtime_data.async_refresh()
+            await hass.async_block_till_done()
+            assert float(state("used_target_temperature").state) == 21
+            entry.runtime_data.engine.output_applied = True
+            entry.runtime_data.async_set_updated_data(entry.runtime_data.data)
+            await hass.async_block_till_done()
+            assert state("learning_status").state == "enabled"
+            entry.runtime_data.engine.output_applied = False
             entry.runtime_data.engine.algo.ctl.integral = 1.25
             assert await hass.config_entries.async_reload(entry.entry_id)
             await hass.async_block_till_done()

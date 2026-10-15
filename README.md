@@ -4,7 +4,7 @@ An unofficial, sensor-only Home Assistant wrapper around the existing SmartPI ma
 core from [KipK/vtherm_smartpi](https://github.com/KipK/vtherm_smartpi).
 No VTherm integration is required. This is not an original or rewritten PI algorithm.
 
-**Experimental prototype (`0.1.0-dev.0`).** It computes a heating-demand percentage;
+**Experimental release (`0.1.0`).** It computes a heating-demand percentage;
 it does not control your heating system. Start in observation mode.
 
 Repository: [Patrick1610/SmartPI-Calculator](https://github.com/Patrick1610/SmartPI-Calculator).
@@ -14,7 +14,7 @@ Repository: [Patrick1610/SmartPI-Calculator](https://github.com/Patrick1610/Smar
 - Reads **room temperature**, **target temperature**, and **current outdoor temperature**
   from three selected numerical entities. No TRV-temperature dependence.
 - Fixed HEAT mode; periodic updates every 30 seconds, logical bookkeeping cycles of 10 minutes.
-- Publishes one **Heating demand** sensor, 0–100%, with model/learning diagnostics.
+- Publishes **Heating demand**, 0–100%, and five diagnostic sensors.
 - Publishes an unavailable sensor on invalid input; never substitutes a fictitious 0 °C.
 - Saves learned model/PI state with Home Assistant storage and restores it after reload/restart.
 - No climate entity, device writes, service calls, schedules, target-writing automations,
@@ -48,7 +48,7 @@ Confirm installation suitability before actuator use.
 
 ## Output and diagnostics
 
-The single `Heating demand` sensor publishes **0–100%**. This is a normalized command,
+The `Heating demand` sensor publishes **0–100%**. This is a normalized command,
 not measured valve position, delivered heat or boiler modulation.
 
 Its attributes expose the selected input temperatures (converted to °C), control phase,
@@ -56,17 +56,30 @@ learning/assumed-application status, PI gains, thermal-model coefficients and ac
 heating/cooling sample counts. Configuration diagnostics can also be downloaded from
 Home Assistant. Source entity IDs are redacted in that download.
 
-No extra diagnostic entities are required to use the output. A fresh, untrained observer
+Five enabled-by-default diagnostic sensors show **Used room temperature**, **Used target
+temperature**, **Used outdoor temperature**, **Control phase** and **Learning status**.
+Temperatures are the actual inputs of the latest successful calculation, stored internally
+in °C and displayed in HA's temperature unit. All six sensors become unavailable together
+when calculation fails. Learning status is `observing` or `enabled`; enabled is permission
+to learn under assumed 1:1 application, not proof that a sample has been accepted. Its
+attributes include accepted heating/cooling sample counts and the feedback assumption.
+The integration is registered as a calculation service, visible under **Devices & services
+→ Integrations**, rather than only under Helpers.
+
+A fresh, untrained observer
 uses the upstream bootstrap hysteresis; an available percentage alone does not prove
 that a learned PI model is active or that heat is physically being delivered.
 
 ## Setup
 
-This is a source publication, not a stable release or inclusion in HACS's default store.
-The steps below describe manual installation of the experimental component.
+Install through HACS as a **custom repository**: add
+`https://github.com/Patrick1610/SmartPI-Calculator` with type **Integration**, download
+release `v0.1.0`, and restart Home Assistant. Then select **Settings → Devices & services
+→ Add integration → SmartPI Calculator**. This is not inclusion in HACS's default catalog;
+that requires a separate upstream review. HACS manages files and updates, not room setup.
 
-Requires Home Assistant **2026.10 or newer**. Copy `custom_components/smartpi_calculator/`
-into HA's `custom_components/`, restart HA when appropriate, then add **SmartPI Calculator**.
+Requires Home Assistant **2026.10 or newer**. For manual installation instead, copy
+`custom_components/smartpi_calculator/` into HA's `custom_components/` and restart HA.
 Choose a name and the three source entities. The target source is a numeric state, not a
 climate attribute; an existing RoomMind target sensor is suitable. Values with °F are converted
 to °C; a missing unit uses HA's configured temperature unit (for numerical target helpers).
@@ -118,8 +131,8 @@ actuator-service calls. Passing local tests is not a live HA installation or phy
 heating validation. A source publication does not itself install or connect the output.
 
 Verified locally on 2026-10-15 with Python 3.14.4 / Home Assistant 2026.10.1:
-32 tests pass, Ruff and compileall pass. An isolated temporary HA instance loads the
-actual integration and its sensor, reports unavailable on invalid input, recovers,
+33 tests pass, Ruff and compileall pass. An isolated temporary HA instance loads the
+actual integration and all six sensors, reports unavailable on invalid input, recovers,
 restores integral state across reload, and unloads. Configuration tests exercise the
 current HA `probatio` schema API (a core dependency in this baseline).
 A synthetic 24-hour heating/cooling run reaches both bootstrap and stable phases and
