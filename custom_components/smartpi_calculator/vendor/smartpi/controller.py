@@ -1,0 +1,519 @@
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass
+from math import isfinite
+
+from .const import (
+    DEADBAND_EDGE_PERSISTENCE,
+    KI_MIN,
+    OVERSHOOT_I_CLAMP_EPS_C,
+    SETPOINT_MODE_DELTA_C,
+    TRAJECTORY_I_RUN_SCALE,
+    clamp
+)
+from .deadband_output import deadband_proportional_error
+from .integral_guard import constrain_guarded_integral_delta
+from ..hvac_mode import VThermHvacMode, VThermHvacMode_COOL
+
+_LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class IntegralPowerTransferResult:
+    """Result of moving one signed power contribution out of the integral."""
+
+    applied: bool
+    reason: str
+    requested_power: float
+    applied_power: float
+    old_i_power: float
+    new_i_power: float
+
+class SmartPIController:
+    """
+    PID Controller for Smart-PI.
+    
+    Responsible for:
+    1. PID Calculation (Proportional, Integral, FF).
+    2. Integral management (Anti-windup, Leaks, Clamping).
+    3. Hysteresis logic (Phase 1).
+    4. Output saturation handling.
+    """
+
+    def __init__(self, name: str):
+        self._name = name
+        
+        # PI State
+        self.integral: float = 0.0
+        self.u_prev: float = 0.0
+        self.u_ff: float = 0.0
+        self.u_p: float = 0.0
+        self.u_i: float = 0.0
+        self.u_pi: float = 0.0
+        self.u_cmd: float = 0.0     # Requested (clamped 0-1)
+        self.u_hold: float = 0.0    # Held deadband power
+        self.u_limited: float = 0.0 # After rate/max limit
+        self.u_applied: float = 0.0 # Output after timing constraints
+        
+        # Diagnostics
+        self.last_error: float = 0.0
+        self.last_error_p: float = 0.0
+        self.last_error_p_db: float = 0.0
+        self.last_i_mode: str = "init"
+        self.last_integral_hold_source: str = "none"
+        self.last_sat: str = "init"
+        self.sat_p: bool = False
+        self.sat_i: bool = False
+        self.deadband_power_source: str = "none"
+        self.deadband_p_mode: str = "init"
+        self.integral_hold_mode: str = "none"
+        self._deadband_edge_count: int = 0
+        self._deadband_edge_sign: float | None = None
+
+        # Setpoint landing command cap (post-PI governor)
+        self.u_cmd_before_cap: float | None = None
+        self.u_cmd_cap: float | None = None
+
+        # Hysteresis State
+        self.hysteresis_state: str = "off"
+
+    def reset(self):
+        self.integral = 0.0
+        self.u_prev = 0.0
+        self.u_ff = 0.0
+        self.u_p = 0.0
+        self.u_i = 0.0
+        self.u_pi = 0.0
+        self.u_hold = 0.0
+        self.last_error = 0.0
+        self.last_error_p = 0.0
+        self.last_error_p_db = 0.0
+        self.sat_p = False
+        self.sat_i = False
+        self.deadband_power_source = "none"
+        self.deadband_p_mode = "init"
+        self.integral_hold_mode = "none"
+        self.last_integral_hold_source = "none"
+        self._deadband_edge_count = 0
+        self._deadband_edge_sign = None
+        self.u_cmd_before_cap = None
+        self.u_cmd_cap = None
+        self.hysteresis_state = "off"
+
+    def apply_command_cap(self, u_cap: float | None) -> float:
+        """Apply the setpoint-response command cap to u_cmd."""
+        self.u_cmd_before_cap = self.u_cmd
+        self.u_cmd_cap = u_cap
+        if u_cap is None:
+            return self.u_cmd
+        self.u_cmd = clamp(self.u_cmd, 0.0, max(float(u_cap), 0.0))
+        return self.u_cmd
+
+    @property
+    def integral_hold_active(self) -> bool:
+        """Return True when integral protection hold is active."""
+        return self.integral_hold_mode != "none"
+
+    @property
+    def servo_integral_hold(self) -> bool:
+        """Compatibility alias for the legacy servo-only hold flag."""
+        return self.integral_hold_mode == "servo_recovery"
+
+    @servo_integral_hold.setter
+    def servo_integral_hold(self, value: bool) -> None:
+        """Map legacy servo hold toggles to the generic hold state."""
+        if value:
+            self.start_integral_hold("servo_recovery")
+        elif self.integral_hold_mode == "servo_recovery":
+            self.clear_integral_hold()
+
+    def start_integral_hold(self, mode: str) -> None:
+        """Activate the generic integral hold state."""
+        if not mode or mode == "none":
+            return
+        self.integral_hold_mode = mode
+
+    def clear_integral_hold(self) -> None:
+        """Release the generic integral hold state."""
+        self.integral_hold_mode = "none"
+        
+        
+    def handle_setpoint_change(
+        self,
+        target_temp: float,
+        last_target_temp: float,
+        current_temp: float,
+        hvac_mode: VThermHvacMode,
+        kp: float,
+        ki: float,
+    ) -> tuple[float, float]:
+        """Preserve integral memory and restart the servo path on setpoint changes.
+
+        Two-tier setpoint change handling:
+        - Large change (>= SETPOINT_MODE_DELTA_C): preserve the integral but
+          restart the setpoint-response state (error history + recovery hold)
+        - Small change: Servo response handled by P + SP filter + FF;
+          integral is preserved (Åström §3.5: integral is slow memory
+          for disturbance rejection, not a servo transition variable).
+
+        Args:
+            target_temp: New setpoint (°C)
+            last_target_temp: Previous setpoint (°C)
+            current_temp: Current indoor temperature (°C)
+            hvac_mode: Current HVAC mode
+            kp: Proportional gain
+            ki: Integral gain
+
+        Returns:
+            Tuple of (new_error, new_error_p) to apply to main class state
+        """
+        if last_target_temp is None:
+            return 0.0, 0.0
+
+        sp_delta = abs(target_temp - last_target_temp)
+        if sp_delta <= 0.01:
+            return 0.0, 0.0
+
+        if sp_delta >= SETPOINT_MODE_DELTA_C:
+            # Large demand changes restart the setpoint-response path without
+            # erasing the disturbance-rejection memory stored in the integral.
+            # Force reset error state to avoid "wrong" error history (e.g. sign flip)
+            new_e = float(target_temp - current_temp)
+            if hvac_mode == VThermHvacMode_COOL:
+                new_e = -new_e
+
+            self.last_error = new_e
+            self.last_error_p = new_e
+
+            _LOGGER.info(
+                "%s - Large setpoint change detected (Δ=%.2f°C >= %.2f°C): preserve integral %.4f and restart the servo path",
+                self._name, sp_delta, SETPOINT_MODE_DELTA_C, self.integral
+            )
+
+            return new_e, new_e
+
+        return 0.0, 0.0
+
+    def load_state(self, state: dict):
+        if not state:
+            return
+        self.integral = float(state.get("integral") or 0.0)
+        self.integral_hold_mode = str(state.get("integral_hold_mode") or "none")
+        self.last_integral_hold_source = "none"
+        # Note: other internal diagnositcs not critical to restore
+        
+    def save_state(self) -> dict:
+        return {
+            "integral": self.integral,
+            "integral_hold_mode": self.integral_hold_mode,
+        }
+
+    def calculate_hysteresis(
+        self,
+        target_temp: float,
+        current_temp: float,
+        hvac_mode: VThermHvacMode,
+        hyst_upper: float,
+        hyst_lower: float
+    ) -> float:
+        """Simple hysteresis control."""
+        on_percent = 0.0
+        
+        if hvac_mode == VThermHvacMode_COOL:
+            if current_temp <= target_temp - hyst_lower:
+                on_percent = 0.0
+                self.hysteresis_state = "off"
+            elif current_temp >= target_temp + hyst_upper:
+                on_percent = 1.0
+                self.hysteresis_state = "on"
+            else:
+                self.hysteresis_state = "band"
+                on_percent = None  # No change
+        else: # HEAT
+            if current_temp >= target_temp + hyst_upper:
+                on_percent = 0.0
+                self.hysteresis_state = "off"
+            elif current_temp <= target_temp - hyst_lower:
+                on_percent = 1.0
+                self.hysteresis_state = "on"
+            else:
+                self.hysteresis_state = "band"
+                on_percent = None # No change
+                
+        # If in band, we need to know previous state. 
+        # But this function is stateless regarding previous OUTPUT, only previous HYST STATE.
+        # Actually in the main class it sets self._on_percent directly.
+        # We will return None if "no change"
+        return on_percent
+
+    def compute_pwm(
+        self,
+        error: float,
+        error_p: float,
+        kp: float,
+        ki: float,
+        u_ff: float,
+        dt_min: float,
+        cycle_min: float,
+        in_deadband: bool,
+        in_near_band: bool,
+        integrator_hold: bool,
+        u_db_nominal: float,
+        hvac_mode: VThermHvacMode,
+        current_temp: float,
+        target_temp: float,
+        is_tau_reliable: bool,
+        learn_ok_count_a: int,
+        deadband_c: float,
+        trajectory_shaping_active: bool = False,
+        core_deadband: bool | None = None,
+        block_positive_integral: bool = False,
+        block_negative_integral: bool = False,
+        positive_integral_guard_mode: str = "recovery_guard",
+        deadband_allow_p: bool = False,
+        integrator_hold_source: str = "external",
+    ) -> float:
+        """
+        Main PID Calculation logic.
+        Updates self.integral, self.u_pi, self.u_cmd.
+        Returns u_cmd (clamped 0-1).
+        """
+        self.last_error = error
+        self.last_error_p = error_p
+        self.last_integral_hold_source = "none"
+        freeze_deadband = in_deadband if core_deadband is None else core_deadband
+
+        if self.integral_hold_active and freeze_deadband:
+            self.clear_integral_hold()
+
+        error_p_db, self.deadband_p_mode = deadband_proportional_error(
+            error_p=error_p,
+            deadband_c=deadband_c,
+            freeze_deadband=freeze_deadband,
+            deadband_allow_p=deadband_allow_p,
+        )
+        if self.deadband_p_mode in {"deadband_edge", "deadzone_edge"}:
+            edge_sign = 1.0 if error_p_db >= 0.0 else -1.0
+            if self._deadband_edge_sign == edge_sign:
+                self._deadband_edge_count += 1
+            else:
+                self._deadband_edge_sign = edge_sign
+                self._deadband_edge_count = 1
+            if (
+                self.deadband_p_mode == "deadband_edge"
+                and self._deadband_edge_count < DEADBAND_EDGE_PERSISTENCE
+            ):
+                error_p_db = 0.0
+                self.deadband_p_mode = "deadband_edge_pending"
+        else:
+            self._deadband_edge_count = 0
+            self._deadband_edge_sign = None
+        self.last_error_p_db = error_p_db
+        
+        i_max = 2.0 / max(ki, KI_MIN)
+        u_pi = 0.0
+        
+        # --- Pre-calculate saturation state universally ---
+        u_pi_pre = kp * error_p_db + ki * self.integral
+        u_raw_pre = u_ff + u_pi_pre
+        
+        if u_raw_pre > 1.0:
+            sat = "SAT_HI"
+        elif u_raw_pre < 0.0:
+            sat = "SAT_LO"
+        else:
+            sat = "NO_SAT"
+        self.last_sat = sat
+        
+        # P-Saturation check
+        u_raw_p = u_ff + kp * error_p_db
+        self.sat_p = (u_raw_p > 1.0 + 1e-9 or u_raw_p < -1e-9)
+        # ------------------------------------------------
+        
+        if freeze_deadband:
+            # Deadband mode: integral is frozen; P term is damped near the edge when allowed.
+            # No extra maintenance governor is applied on top of the PI state.
+            self.last_i_mode = "I:FREEZE(deadband)"
+
+            self.integral = clamp(self.integral, -i_max, i_max)
+
+            u_pi = kp * error_p_db + ki * self.integral
+
+            self.u_hold = u_ff + u_pi
+            self.deadband_power_source = "ff_plus_pi"
+        else:
+            self.deadband_power_source = "none"
+            if self.integral_hold_active:
+                u_pi = kp * error_p_db + ki * self.integral
+                self.last_i_mode = f"I:HOLD({self.integral_hold_mode})"
+                self.last_integral_hold_source = self.integral_hold_mode
+            elif integrator_hold:
+                u_pi = kp * error_p_db + ki * self.integral
+                self.last_i_mode = "I:HOLD"
+                self.last_integral_hold_source = str(integrator_hold_source)
+            else:
+                # Conditional Integration
+                if (sat == "SAT_HI" and error > 0) or (sat == "SAT_LO" and error < 0):
+                    self.last_i_mode = f"I:SKIP({sat})"
+                    u_pi = u_pi_pre
+                    self.sat_i = True
+                else:
+                    self.sat_i = False
+                    d_integral = error * dt_min
+                    self.last_i_mode = "I:RUN"
+
+                    d_integral, guard_delta_mode = constrain_guarded_integral_delta(
+                        integral=self.integral,
+                        requested_delta=d_integral,
+                        block_positive=block_positive_integral,
+                        block_negative=block_negative_integral,
+                    )
+                    if guard_delta_mode == "blocked":
+                        self.last_i_mode = f"I:GUARD({positive_integral_guard_mode})"
+                    elif guard_delta_mode == "unwind":
+                        self.last_i_mode = f"I:GUARD_UNWIND({positive_integral_guard_mode})"
+
+                    if (
+                        trajectory_shaping_active
+                        and guard_delta_mode == "run"
+                        and d_integral > 0.0
+                    ):
+                        d_integral *= TRAJECTORY_I_RUN_SCALE
+                        self.last_i_mode = "I:RUN(traj_track)"
+                    
+                    # Signed overshoot clamp — once the signed error is near/beyond
+                    # zero we do not allow the integral to grow further.
+                    if error <= OVERSHOOT_I_CLAMP_EPS_C:
+                        if d_integral > 0.0:
+                            d_integral = 0.0
+                            self.last_i_mode = "I:CLAMP(near_ovr)"
+                            
+                    self.integral += d_integral
+                    self.integral = clamp(self.integral, -i_max, i_max)
+                    u_pi = kp * error_p_db + ki * self.integral
+
+        self.u_p = kp * error_p_db
+        self.u_i = ki * self.integral
+        self.u_pi = u_pi
+        self.u_ff = u_ff
+
+        if freeze_deadband:
+            # Explicit hold using Frozen PI: `u_ff + u_pi`.
+            # FF2 trim learns from the slope slowly.
+            u_raw = u_ff + u_pi
+        else:
+            self.u_hold = 0.0
+            u_raw = u_ff + u_pi
+
+        self.u_cmd = clamp(u_raw, 0.0, 1.0)
+
+        return self.u_cmd
+
+    def apply_integral_power_transfer(
+        self,
+        *,
+        ki: float,
+        requested_power: float,
+    ) -> IntegralPowerTransferResult:
+        """Remove a signed power contribution from the integral atomically.
+
+        A positive request removes positive integral power. A negative request
+        removes negative integral power. The operation may only move the
+        integral contribution toward zero and never crosses it.
+        """
+        if not isfinite(float(ki)) or float(ki) < KI_MIN:
+            return IntegralPowerTransferResult(
+                False,
+                "invalid_ki",
+                float(requested_power),
+                0.0,
+                0.0,
+                0.0,
+            )
+        if not isfinite(float(requested_power)):
+            return IntegralPowerTransferResult(
+                False,
+                "invalid_i_transfer",
+                float(requested_power),
+                0.0,
+                float(ki) * self.integral,
+                float(ki) * self.integral,
+            )
+
+        ki_value = float(ki)
+        requested = float(requested_power)
+        old_i_power = ki_value * self.integral
+        if abs(requested) <= 1e-12:
+            return IntegralPowerTransferResult(
+                True,
+                "no_i_transfer",
+                requested,
+                0.0,
+                old_i_power,
+                old_i_power,
+            )
+        if old_i_power * requested <= 0.0:
+            return IntegralPowerTransferResult(
+                False,
+                "i_transfer_sign",
+                requested,
+                0.0,
+                old_i_power,
+                old_i_power,
+            )
+        if abs(requested) > abs(old_i_power) + 1e-9:
+            return IntegralPowerTransferResult(
+                False,
+                "i_transfer_capacity",
+                requested,
+                0.0,
+                old_i_power,
+                old_i_power,
+            )
+
+        new_i_power = old_i_power - requested
+        if old_i_power * new_i_power < -1e-12:
+            return IntegralPowerTransferResult(
+                False,
+                "i_transfer_crosses_zero",
+                requested,
+                0.0,
+                old_i_power,
+                old_i_power,
+            )
+
+        new_integral = new_i_power / ki_value
+        i_max = 2.0 / ki_value
+        if not isfinite(new_integral) or not -i_max <= new_integral <= i_max:
+            return IntegralPowerTransferResult(
+                False,
+                "i_transfer_clamped",
+                requested,
+                0.0,
+                old_i_power,
+                old_i_power,
+            )
+
+        self.integral = new_integral
+        self.u_i = new_i_power
+        self.u_pi = self.u_p + self.u_i
+        if self.last_i_mode == "I:FREEZE(deadband)":
+            self.u_hold = self.u_ff + self.u_pi
+        return IntegralPowerTransferResult(
+            True,
+            "i_transfer_applied",
+            requested,
+            requested,
+            old_i_power,
+            new_i_power,
+        )
+
+    def finalize_cycle(
+        self,
+        u_limited: float,
+        u_applied: float,
+    ) -> None:
+        """Record the latest output without committing u_prev."""
+        self.u_applied = u_applied
+        self.u_limited = u_limited

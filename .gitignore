@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.pyc
+dist/
+.ai-review-broker/
+.DS_Store
+.env
+.env.*
+DEPLOYMENT.local.md
+config_entry-*.json

@@ -1,0 +1,16 @@
+{
+  "title": "SmartPI Calculator",
+  "config": {
+    "step": {"user": {
+      "title": "Standalone SmartPI calculator",
+      "description": "Only calculates a heating demand, 0–100%. Never controls devices. Learning starts disabled until you confirm external 1:1 application in Options.",
+      "data": {"name": "Name", "temperature_entity": "Room temperature", "target_entity": "Target temperature", "outdoor_entity": "Current outdoor temperature"}
+    }},
+    "abort": {"already_configured": "A calculator for this room temperature source already exists."}
+  },
+  "options": {"step": {"init": {
+    "title": "Sources and learning",
+    "description": "Enable learning only when the published demand is actually applied externally 1:1. Boiler outages and external suppression are not detected. There is no pump-overrun protection.",
+    "data": {"temperature_entity": "Room temperature", "target_entity": "Target temperature", "outdoor_entity": "Current outdoor temperature", "output_applied": "Demand is applied externally 1:1 — enable learning"}
+  }}}
+}

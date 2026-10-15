@@ -1,0 +1,185 @@
+{
+  "repository": "https://github.com/KipK/vtherm_smartpi",
+  "commit": "6a131df56cf3cfe2974f78f55f33ce8a095076b3",
+  "license": "Apache-2.0",
+  "adaptations": {
+    "hvac_mode.py": "Replace VTherm logger import with standard logging only."
+  },
+  "files": [
+    {
+      "path": "algo.py",
+      "upstream_sha256": "098d146155e6e8f574045e144e9ea0848be01ebfe6be9efc227f97f956a65676",
+      "vendored_sha256": "098d146155e6e8f574045e144e9ea0848be01ebfe6be9efc227f97f956a65676"
+    },
+    {
+      "path": "const.py",
+      "upstream_sha256": "7abee5e0dfde28cdc537c8ca9beb4a9f018dd166fbbe5f29094c67e70be5b684",
+      "vendored_sha256": "7abee5e0dfde28cdc537c8ca9beb4a9f018dd166fbbe5f29094c67e70be5b684"
+    },
+    {
+      "path": "hvac_mode.py",
+      "upstream_sha256": "b6eff717cbb70e5c903c3a77d31f720f8a70e1254fe2c814172a23f9d8f15d11",
+      "vendored_sha256": "0eba3b41d93c006f4cf2bd5abc9ff14fb83b8a45b2ad2c8f43dfe5257902c9cd"
+    },
+    {
+      "path": "smartpi/__init__.py",
+      "upstream_sha256": "45ba07844ce7b966b5df0551ee69fe0c288f375509649f67cd1a22dfd205f9b0",
+      "vendored_sha256": "45ba07844ce7b966b5df0551ee69fe0c288f375509649f67cd1a22dfd205f9b0"
+    },
+    {
+      "path": "smartpi/ab_aggregator.py",
+      "upstream_sha256": "5070d6c4f0b45a97f83df00b5c06352c54898ca4b2c6af2bee9b5e3cddc39a5b",
+      "vendored_sha256": "5070d6c4f0b45a97f83df00b5c06352c54898ca4b2c6af2bee9b5e3cddc39a5b"
+    },
+    {
+      "path": "smartpi/ab_drift.py",
+      "upstream_sha256": "43abd020c0745585c1082795a2693e99f3d7c7b930bb4cb97f8c2e579e6facdd",
+      "vendored_sha256": "43abd020c0745585c1082795a2693e99f3d7c7b930bb4cb97f8c2e579e6facdd"
+    },
+    {
+      "path": "smartpi/ab_estimator.py",
+      "upstream_sha256": "9462624fa50cffb9ba368dc4199fa474a313cf514e6a58384ca151f0e4bf961f",
+      "vendored_sha256": "9462624fa50cffb9ba368dc4199fa474a313cf514e6a58384ca151f0e4bf961f"
+    },
+    {
+      "path": "smartpi/autocalib.py",
+      "upstream_sha256": "b30549dd849bdeecfaf68655f705eeaea865b49e649e97b21954a16bcb14232f",
+      "vendored_sha256": "b30549dd849bdeecfaf68655f705eeaea865b49e649e97b21954a16bcb14232f"
+    },
+    {
+      "path": "smartpi/calibration.py",
+      "upstream_sha256": "bec9a3634d211b765bd771b6f0a025f1f7a0c58d9affda28584d5b8efc10ff3f",
+      "vendored_sha256": "bec9a3634d211b765bd771b6f0a025f1f7a0c58d9affda28584d5b8efc10ff3f"
+    },
+    {
+      "path": "smartpi/command_ownership.py",
+      "upstream_sha256": "4ce45969d2b899571ecf7a1319e916e7018d22a3d9dcf1d0a3f79e4f6f91ff40",
+      "vendored_sha256": "4ce45969d2b899571ecf7a1319e916e7018d22a3d9dcf1d0a3f79e4f6f91ff40"
+    },
+    {
+      "path": "smartpi/const.py",
+      "upstream_sha256": "eaa1f92db3b5c8bd47c1718ec66d3d378f2cf1e6a3890528e09049e3c2bc21fc",
+      "vendored_sha256": "eaa1f92db3b5c8bd47c1718ec66d3d378f2cf1e6a3890528e09049e3c2bc21fc"
+    },
+    {
+      "path": "smartpi/controller.py",
+      "upstream_sha256": "44fe267612ba95bbec36c3dd447096634ec41d726aa4fe873bd34170364f48ca",
+      "vendored_sha256": "44fe267612ba95bbec36c3dd447096634ec41d726aa4fe873bd34170364f48ca"
+    },
+    {
+      "path": "smartpi/deadband.py",
+      "upstream_sha256": "a703e24ca942e2750573139cfe5b6e09a703151e2cd8dcc7a924577568a63010",
+      "vendored_sha256": "a703e24ca942e2750573139cfe5b6e09a703151e2cd8dcc7a924577568a63010"
+    },
+    {
+      "path": "smartpi/deadband_output.py",
+      "upstream_sha256": "0f1d8a7ea87c1267243a553edeb74fad4f74c18f0eee459e8e3dd64273d01fc0",
+      "vendored_sha256": "0f1d8a7ea87c1267243a553edeb74fad4f74c18f0eee459e8e3dd64273d01fc0"
+    },
+    {
+      "path": "smartpi/deadtime_estimator.py",
+      "upstream_sha256": "120f1da3eda176befbd76c437ce0c624ff27e69db4db1f13a55b4ad7b9d8a29f",
+      "vendored_sha256": "120f1da3eda176befbd76c437ce0c624ff27e69db4db1f13a55b4ad7b9d8a29f"
+    },
+    {
+      "path": "smartpi/diagnostic_history.py",
+      "upstream_sha256": "7315af8750d5ce03963dc19779cfc1f9309f32d50c9162748c7051696fc2c185",
+      "vendored_sha256": "7315af8750d5ce03963dc19779cfc1f9309f32d50c9162748c7051696fc2c185"
+    },
+    {
+      "path": "smartpi/diagnostics.py",
+      "upstream_sha256": "ba1d0604e0e8c921d6c6d4c11b3988413c341a0680a6d93026016685f7c4a9a8",
+      "vendored_sha256": "ba1d0604e0e8c921d6c6d4c11b3988413c341a0680a6d93026016685f7c4a9a8"
+    },
+    {
+      "path": "smartpi/feedforward.py",
+      "upstream_sha256": "74b556ddb73ba4e79204324c25765b86f4d4b08eb78878d05c63935758b4a5fe",
+      "vendored_sha256": "74b556ddb73ba4e79204324c25765b86f4d4b08eb78878d05c63935758b4a5fe"
+    },
+    {
+      "path": "smartpi/ff3.py",
+      "upstream_sha256": "9014ee050fab2444bd68c7a03867f7c31e25dcf789fa01f8faba47ba04fbe1d5",
+      "vendored_sha256": "9014ee050fab2444bd68c7a03867f7c31e25dcf789fa01f8faba47ba04fbe1d5"
+    },
+    {
+      "path": "smartpi/ff3_eligibility.py",
+      "upstream_sha256": "ce7d2e8b75061f1373f2418b177ddb7b50819cdce6c68d34625eb2ef2f1ce7b5",
+      "vendored_sha256": "ce7d2e8b75061f1373f2418b177ddb7b50819cdce6c68d34625eb2ef2f1ce7b5"
+    },
+    {
+      "path": "smartpi/ff3_predictor.py",
+      "upstream_sha256": "52697bfc6f1f968f6b62db58b638fbfdcd71571340d98780095f06b8075f3d85",
+      "vendored_sha256": "52697bfc6f1f968f6b62db58b638fbfdcd71571340d98780095f06b8075f3d85"
+    },
+    {
+      "path": "smartpi/ff_ab_confidence.py",
+      "upstream_sha256": "7931b4401b418de01e5e6a3aa8f7c2f093e0f7a7eec23506f8dd363fcd790b51",
+      "vendored_sha256": "7931b4401b418de01e5e6a3aa8f7c2f093e0f7a7eec23506f8dd363fcd790b51"
+    },
+    {
+      "path": "smartpi/ff_trim.py",
+      "upstream_sha256": "2c37e68f9b2bdbb438dc2d30b72122f51ed4f8e2c3bd8823f13b12d21675afbc",
+      "vendored_sha256": "2c37e68f9b2bdbb438dc2d30b72122f51ed4f8e2c3bd8823f13b12d21675afbc"
+    },
+    {
+      "path": "smartpi/ff_trim_periodic.py",
+      "upstream_sha256": "43cc0be7c05fee84ea30c7b6df55bdea817e5b7afe571dffab4eaeb67e72f2e8",
+      "vendored_sha256": "43cc0be7c05fee84ea30c7b6df55bdea817e5b7afe571dffab4eaeb67e72f2e8"
+    },
+    {
+      "path": "smartpi/gains.py",
+      "upstream_sha256": "7194f73034b9bc61ea1c129fbc946b40f38719542d7dce7a8a3b9cba653fb594",
+      "vendored_sha256": "7194f73034b9bc61ea1c129fbc946b40f38719542d7dce7a8a3b9cba653fb594"
+    },
+    {
+      "path": "smartpi/governance.py",
+      "upstream_sha256": "b8f85b716706c8967fa4a558876275ffc56f5b8be8622487be6e64724f80ea3c",
+      "vendored_sha256": "b8f85b716706c8967fa4a558876275ffc56f5b8be8622487be6e64724f80ea3c"
+    },
+    {
+      "path": "smartpi/guards.py",
+      "upstream_sha256": "235607c024a1992587f63634416a69a52f84c029824821f33ddc345c008c17e1",
+      "vendored_sha256": "235607c024a1992587f63634416a69a52f84c029824821f33ddc345c008c17e1"
+    },
+    {
+      "path": "smartpi/integral_guard.py",
+      "upstream_sha256": "a63377ef3506ad89ab6594b5ef56ff300b6ecfeb45d978e76748aeb8a67bc719",
+      "vendored_sha256": "a63377ef3506ad89ab6594b5ef56ff300b6ecfeb45d978e76748aeb8a67bc719"
+    },
+    {
+      "path": "smartpi/learning_window.py",
+      "upstream_sha256": "28f2c2a0c74c0e35689dd5853d851ed6b5c0decf03f5eb8582c1831c226e2311",
+      "vendored_sha256": "28f2c2a0c74c0e35689dd5853d851ed6b5c0decf03f5eb8582c1831c226e2311"
+    },
+    {
+      "path": "smartpi/setpoint.py",
+      "upstream_sha256": "24f2a37a88e5392b653fdd5a2c46ce8016bdc75b7d0d5b4a1bb250ead2a13ff4",
+      "vendored_sha256": "24f2a37a88e5392b653fdd5a2c46ce8016bdc75b7d0d5b4a1bb250ead2a13ff4"
+    },
+    {
+      "path": "smartpi/thermal_twin_1r1c.py",
+      "upstream_sha256": "e6c211eac3d9e61828216ed2959d18b73576caf474d4d55c9124018f4ec4bd8e",
+      "vendored_sha256": "e6c211eac3d9e61828216ed2959d18b73576caf474d4d55c9124018f4ec4bd8e"
+    },
+    {
+      "path": "smartpi/timestamp_utils.py",
+      "upstream_sha256": "d546a5a03c6bc0d72814b80179a2162eeeaa275163658c8a0079581bfe592d53",
+      "vendored_sha256": "d546a5a03c6bc0d72814b80179a2162eeeaa275163658c8a0079581bfe592d53"
+    },
+    {
+      "path": "smartpi/tint_filter.py",
+      "upstream_sha256": "1848e8ce7868467fdb91250a72fd1fcb2ad420c18f5b8171418fd4e148ba7791",
+      "vendored_sha256": "1848e8ce7868467fdb91250a72fd1fcb2ad420c18f5b8171418fd4e148ba7791"
+    },
+    {
+      "path": "smartpi/trajectory.py",
+      "upstream_sha256": "3184e2a9220ee41d138d7fceaa3269fe91141f038bafccc1f454f8eca9417212",
+      "vendored_sha256": "3184e2a9220ee41d138d7fceaa3269fe91141f038bafccc1f454f8eca9417212"
+    },
+    {
+      "path": "smartpi/valve_curve.py",
+      "upstream_sha256": "ce52131ce8608ef65cfb60710d3c9837d47dff952bdaeff9ba2e7cb90c0a76fd",
+      "vendored_sha256": "ce52131ce8608ef65cfb60710d3c9837d47dff952bdaeff9ba2e7cb90c0a76fd"
+    }
+  ]
+}

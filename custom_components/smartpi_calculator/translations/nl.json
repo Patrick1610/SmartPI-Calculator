@@ -1,0 +1,16 @@
+{
+  "title": "SmartPI Calculator",
+  "config": {
+    "step": {"user": {
+      "title": "Zelfstandige SmartPI-rekenaar",
+      "description": "Berekent uitsluitend een warmtevraag van 0–100%. Stuurt geen apparaten aan. Zelfleren staat eerst uit; schakel dit via Opties in zodra de uitgang werkelijk 1-op-1 wordt toegepast.",
+      "data": {"name": "Naam", "temperature_entity": "Kamertemperatuur", "target_entity": "Doeltemperatuur", "outdoor_entity": "Actuele buitentemperatuur"}
+    }},
+    "abort": {"already_configured": "Er bestaat al een rekenaar voor deze kamertemperatuurbron."}
+  },
+  "options": {"step": {"init": {
+    "title": "Bronnen en zelfleren",
+    "description": "Schakel zelfleren alleen in als de berekende uitgang extern werkelijk 1-op-1 wordt toegepast. Keteluitval en externe onderdrukking worden niet gedetecteerd. Deze rekenaar regelt geen pompnaloop.",
+    "data": {"temperature_entity": "Kamertemperatuur", "target_entity": "Doeltemperatuur", "outdoor_entity": "Actuele buitentemperatuur", "output_applied": "Uitgang wordt extern 1-op-1 toegepast — zelfleren inschakelen"}
+  }}}
+}

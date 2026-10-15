@@ -1,0 +1,11 @@
+SmartPI Calculator is an unofficial, standalone derivative of Versatile Thermostat SmartPI.
+Upstream: https://github.com/KipK/vtherm_smartpi
+Upstream authors include KipK (Guillaume S) and gael1980; see the upstream Git history
+for complete contributor attribution. The copied code is not claimed as original work.
+Pinned source commit: 6a131df56cf3cfe2974f78f55f33ce8a095076b3.
+Upstream license: Apache License, Version 2.0 (included as LICENSE).
+
+Copied mathematical modules are preserved in custom_components/smartpi_calculator/vendor/.
+The original HVAC mode module's VTherm-specific logger import is replaced with Python's
+standard logger. The standalone integration host, config flow and tests are new additions.
+VTherm integration setup, UI, runtime handler and actuator-control code are not included.
