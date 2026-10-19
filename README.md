@@ -4,7 +4,7 @@ An unofficial Home Assistant wrapper around the existing SmartPI mathematical
 core from [KipK/vtherm_smartpi](https://github.com/KipK/vtherm_smartpi).
 No VTherm integration is required. This is not an original or rewritten PI algorithm.
 
-**Experimental source candidate (`0.2.2`).** It computes a heating-demand percentage and can
+**Experimental source candidate (`0.2.3`).** It computes a heating-demand percentage and can
 optionally write explicitly selected valve endpoints. Start with **Learning disabled**.
 
 Repository: [Patrick1610/SmartPI-Calculator](https://github.com/Patrick1610/SmartPI-Calculator).
@@ -109,12 +109,27 @@ usable span. The minimum is a command-space offset, not proof of flow or a linea
 
 The PI core, its contribution sensors, and its time-weighted learning history stay in
 **normalized demand space**. Only the actuator adapter maps to per-radiator endpoints;
-learning still requires matching echoes of those **mapped** commands. Changing a nonzero
-minimum changes the model binding and starts a fresh model on reload, including changing
-it back to zero. Missing or explicitly zero minima retain the legacy model binding and
-do not reset an existing identity-mapping model. Options saves retain normal safe-close
+learning still requires matching echoes of those **mapped** commands. Changing a minimum
+retains the learned model, real sample histories and PI integral **unchanged**, including
+changing it back to zero. Range provenance is stored, but is not a model-erasure trigger.
+Existing 0.2.2 bindings with minima are accepted when room/outside sources, mode and
+actuator lists still match. This is data retention, not automatic thermal re-identification:
+old heating estimates are a retained prior, not certified for the new physical range.
+The core's existing sample filters remain authoritative. In particular, outlying heating
+observations cannot recenter until the cooling coefficient is sufficiently converged;
+repeated `skip: a_meas outlier` can therefore persist while cooling is not converged.
+Changing a minimum does not bypass that gate or fabricate replacement samples.
+Monitor physical response and **Last learning result** while tuning. Options saves retain normal safe-close
 and reload behavior. Tune minima only with physical radiator observations; this integration
 does not infer them automatically.
+
+There is no automatic fresh-start action for range tuning. If a retained model is genuinely
+unusable and you deliberately want to discard it, the existing Options mode binding provides
+an escape hatch: save **Learning disabled**, let that reload finish, then restore the intended
+control mode and (for Direct mode) verify its selected valve pairs before saving again.
+Those mode changes create a fresh model for this entry, **discarding all its learned history**;
+they are not a routine tuning step. Preserve an actual copy of that entry's stored model
+before such a deliberate reset; diagnostic counters alone cannot restore samples.
 
 Calculation runs every 30 seconds; ordinary writes and retries are limited to once per
 endpoint per 60 seconds, with a five-second timeout per call. Unconfirmed commands remain
@@ -206,7 +221,7 @@ that a learned PI model is active or that heat is physically being delivered.
 
 Install through HACS as a **custom repository**: add
 `https://github.com/Patrick1610/SmartPI-Calculator` with type **Integration**. Once source
-candidate `0.2.2` has a published release, download it and restart Home Assistant.
+candidate `0.2.3` has a published release, download it and restart Home Assistant.
 Then select **Settings → Devices & services
 → Add integration → SmartPI Calculator**. This is not inclusion in HACS's default catalog;
 that requires a separate upstream review. HACS manages files and updates, not room setup.
@@ -229,8 +244,8 @@ Example sources (select the corresponding entities in your own installation):
 The output entity ID is assigned by Home Assistant from the chosen device name. No output
 consumer is created in Learning disabled or Manual external control. RoomMind and ClimateSync
 configuration are never changed. Source/mode changes are available through Options. Changing
-the room/outside source, mode, valve binding, or usable opening curve resets the restored
-model binding (missing and all-zero minima are the same legacy curve).
+the room/outside source, mode or valve binding resets the restored model binding.
+Tuning usable opening minima alone no longer discards learned data.
 
 ## Provenance and maintenance
 
@@ -268,7 +283,8 @@ mode. Passing local tests is not a physical
 heating validation. A source publication does not itself install or connect the output.
 
 Verified locally on 2026-10-19 with Python 3.14.4 / Home Assistant 2026.10.1:
-150 tests pass; Ruff and compileall pass. An isolated temporary HA instance loads the
+173 tests pass; Ruff, format checks and compileall pass. All 35 pinned vendor hashes match.
+An isolated temporary HA instance loads the
 actual integration and all fourteen sensors, reports unavailable on invalid input, recovers,
 restores integral state across reload, and unloads. Configuration tests exercise the
 current HA `probatio` schema API (a core dependency in this baseline).
@@ -287,3 +303,17 @@ also removes the previously documented duplicate attributes: migrate attribute-b
 templates/dashboards to the existing dedicated sensors. Model coefficients and Kp/Ki
 remain attributes. The control law is unchanged; optional per-radiator usable-range settings
 are applied outside the core, with model-binding checks as described above.
+
+The 0.2.3 fix removes the overly broad minimum-change reset introduced in 0.2.2.
+It preserves sample histories across range tuning and migration from 0.2.2's extended
+bindings, while keeping source/mode/actuator identity checks. An update cannot recreate
+histories already overwritten: recovery requires an actual earlier stored model, not
+diagnostic counters or fabricated samples. No release or live recovery is implied by a
+source commit.
+Regression tests compare retained estimator, PI, deadtime, gains and feed-forward state
+against an ordinary restore, including returning a minimum to zero and a second save/reload.
+Isolated HA lifecycle tests change minima through the actual Options update listener and
+verify unload/save, reload, live diagnostic sensor values and persisted sample histories.
+They also cover unchanged outlier rejection before cooling convergence and the existing
+drift-recentering path after accepted cooling observations make it eligible. This does
+not guarantee that a new physical valve range will automatically re-identify in practice.
