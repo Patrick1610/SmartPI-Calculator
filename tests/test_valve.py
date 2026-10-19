@@ -261,7 +261,7 @@ def test_invalid_mapping_is_rejected(minima):
 
 
 @pytest.mark.parametrize("minimum", [0, 30])
-async def test_minimum_is_part_of_persisted_model_binding(rig, minimum):
+async def test_minimum_changes_preserve_the_complete_learned_model(rig, minimum):
     hass, _ = rig
     settings = {
         **SETTINGS,
@@ -276,6 +276,10 @@ async def test_minimum_is_part_of_persisted_model_binding(rig, minimum):
     coordinator.store = Mock(async_load=AsyncMock(return_value=None))
     await coordinator.initialize()
     coordinator.engine.algo.ctl.integral = 1.25
+    coordinator.engine.algo.est.a_meas_hist.extend([0.05] * 6)
+    coordinator.engine.algo.est.b_meas_hist.extend([0.001] * 31)
+    coordinator.engine.algo.est.a = 0.024
+    coordinator.engine.algo.est.b = 0.000127
     stored = json.loads(json.dumps(coordinator._storage_data()))
     if minimum == 0:
         assert stored["application"] == [MODE_DIRECT, [PAIR[0]], [PAIR[1]]]
@@ -285,7 +289,52 @@ async def test_minimum_is_part_of_persisted_model_binding(rig, minimum):
     assert coordinator.engine.algo.ctl.integral == 1.25
     coordinator.settings[CONF_MIN_OPENING] = {PAIR[0]: minimum + 10}
     await coordinator.initialize()
-    assert coordinator.engine.algo.ctl.integral != 1.25
+    assert coordinator.engine.algo.ctl.integral == 1.25
+    assert coordinator.engine.algo.meas_count_a == 6
+    assert coordinator.engine.algo.meas_count_b == 31
+    assert coordinator.engine.algo.phase.value == "Stable"
+    assert coordinator.engine.algo.a == pytest.approx(0.024)
+    assert coordinator.engine.algo.b == pytest.approx(0.000127)
+    # Subsequent reloads retain the newly saved curve provenance too.
+    coordinator.store.async_load.return_value = json.loads(
+        json.dumps(coordinator._storage_data())
+    )
+    await coordinator.initialize()
+    assert coordinator.engine.algo.meas_count_a == 6
+    assert coordinator.engine.algo.meas_count_b == 31
+    coordinator.settings[CONF_MIN_OPENING] = {PAIR[0]: 0}
+    await coordinator.initialize()
+    assert coordinator.engine.algo.meas_count_a == 6
+    assert coordinator.engine.algo.meas_count_b == 31
+
+
+@pytest.mark.parametrize(
+    "malformed",
+    [
+        None,
+        {},
+        [[PAIR[0], 30], [PAIR[0], 40]],
+        [[PAIR[0], 100]],
+        [["number.other", 30]],
+        [[PAIR[0]]],
+    ],
+)
+async def test_malformed_curve_binding_cannot_bypass_model_identity(rig, malformed):
+    hass, _ = rig
+    settings = {
+        **SETTINGS,
+        "temperature_entity": "sensor.room",
+        "target_entity": "sensor.target",
+        "outdoor_entity": "sensor.outside",
+    }
+    coordinator = CalculatorCoordinator(
+        hass, Mock(data=settings, options={}, title="Test", entry_id="test")
+    )
+    coordinator.store = Mock(async_load=AsyncMock(return_value=None))
+    await coordinator.initialize()
+    assert not coordinator._compatible_application(
+        {"application": [MODE_DIRECT, [PAIR[0]], [PAIR[1]], malformed]}
+    )
 
 
 async def test_mapped_echoes_gate_learning_and_diagnostics_redact_entity_keys(rig):

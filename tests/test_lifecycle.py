@@ -3,13 +3,19 @@
 import asyncio
 from pathlib import Path
 
+import pytest
 from homeassistant import loader
 from homeassistant.config_entries import ConfigEntries, ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry, entity_registry, frame
 
 from custom_components.smartpi_calculator.const import (
+    CONF_CLOSING,
+    CONF_MIN_OPENING,
+    CONF_MODE,
+    CONF_OPENING,
     DOMAIN,
+    MODE_DIRECT,
     MODE_DISABLED,
     MODE_EXTERNAL,
 )
@@ -145,5 +151,95 @@ async def test_real_ha_setup_sensor_unavailable_recovery_and_unload(tmp_path):
             assert not entry.runtime_data.engine.algo.learning_enabled
             assert devices.async_get(device.id).manufacturer is None
             assert await hass.config_entries.async_unload(entry.entry_id)
+    finally:
+        await hass.async_stop()
+
+
+@pytest.mark.parametrize("before,after", [(0, 30), (30, 45), (30, 0)])
+async def test_real_ha_minimum_options_reload_preserves_learned_state(
+    tmp_path, before, after
+):
+    """Exercise the real Options listener, unload/save, setup/load and sensors."""
+    (tmp_path / "custom_components").symlink_to(
+        Path(__file__).resolve().parents[1] / "custom_components"
+    )
+    hass = HomeAssistant(str(tmp_path))
+    loader.async_setup(hass)
+    frame.async_setup(hass)
+    hass.config_entries = ConfigEntries(hass, {})
+    await hass.config_entries.async_initialize()
+    device_registry.async_setup(hass)
+    await device_registry.async_load(hass, load_empty=True)
+    await entity_registry.async_load(hass, load_empty=True)
+    for name, value in (("room", "20"), ("target", "20"), ("outside", "10")):
+        hass.states.async_set(f"sensor.{name}", value, {"unit_of_measurement": "°C"})
+    opening, closing = "number.opening", "number.closing"
+    attrs = {"min": 0, "max": 100, "step": 1}
+    hass.states.async_set(opening, 0, attrs)
+    hass.states.async_set(closing, 100, attrs)
+
+    async def echo(call):
+        hass.states.async_set(call.data["entity_id"], call.data["value"], attrs)
+
+    hass.services.async_register("number", "set_value", echo)
+    entry = ConfigEntry(
+        domain=DOMAIN,
+        title="Isolated direct test",
+        version=2,
+        minor_version=1,
+        source="user",
+        unique_id="sensor.room",
+        options={CONF_MIN_OPENING: {opening: before}},
+        discovery_keys={},
+        subentries_data=[],
+        data={
+            "temperature_entity": "sensor.room",
+            "target_entity": "sensor.target",
+            "outdoor_entity": "sensor.outside",
+            CONF_MODE: MODE_DIRECT,
+            CONF_OPENING: [opening],
+            CONF_CLOSING: [closing],
+        },
+    )
+    try:
+        async with asyncio.timeout(15):
+            await hass.config_entries.async_add(entry)
+            await hass.async_block_till_done()
+            assert entry.state is ConfigEntryState.LOADED
+            previous = entry.runtime_data
+            est = previous.engine.algo.est
+            est.a_meas_hist.extend([0.02] * 8)
+            est.b_meas_hist.extend([0.001] * 31)
+            est.a, est.b = 0.02, 0.001
+            previous.engine.algo.ctl.integral = 1.25
+            hass.config_entries.async_update_entry(
+                entry, options={CONF_MIN_OPENING: {opening: after}}
+            )
+            await hass.async_block_till_done()
+            assert entry.state is ConfigEntryState.LOADED
+            current = entry.runtime_data
+            assert current is not previous
+            assert current.minima == {opening: after}
+            assert current.engine.algo.meas_count_a == 8
+            assert current.engine.algo.meas_count_b == 31
+            assert current.engine.algo.a == 0.02
+            assert current.engine.algo.b == 0.001
+            assert current.engine.algo.ctl.integral == 1.25
+            registry = entity_registry.async_get(hass)
+            for key, expected in (
+                ("learned_heating_samples", "8"),
+                ("learned_cooling_samples", "31"),
+                ("control_phase", "Stable"),
+            ):
+                entity_id = registry.async_get_entity_id(
+                    "sensor", DOMAIN, f"{entry.entry_id}_{key}"
+                )
+                assert hass.states.get(entity_id).state == expected
+            # Shutdown saves the new range with the same learned sample history.
+            await hass.config_entries.async_unload(entry.entry_id)
+            saved = await current.store.async_load()
+            assert saved["application"] == current._application_binding()
+            assert saved["algorithm"]["est_state"]["a_meas_hist"] == [0.02] * 8
+            assert saved["algorithm"]["est_state"]["b_meas_hist"] == [0.001] * 31
     finally:
         await hass.async_stop()
