@@ -25,7 +25,7 @@
       },
       "valve_minima": {
         "title": "Usable valve range",
-        "description": "Set the start of the usable range per radiator. Default 0 preserves existing behavior. Zero demand closes fully; positive demand is rescaled to minimum–100%. For example minimum 30% and demand 5% gives 33.5% before rounding. Changing a minimum starts a new learned model.",
+        "description": "Set the start of the usable range per radiator. Default 0 preserves existing behavior. Zero demand closes fully; positive demand is rescaled to minimum–100%. For example minimum 30% and demand 5% gives 33.5% before rounding. Changing a minimum preserves samples and PI state unchanged. Learning quality gates still apply; monitor heating response and Last learning result.",
         "data": {"minimum_openings": "Minimum opening per radiator"}
       }
     },
@@ -67,7 +67,7 @@
       },
       "valve_minima": {
         "title": "Usable valve range",
-        "description": "Set the start of the usable range per radiator. Default 0 preserves existing behavior. Zero demand closes fully; positive demand is rescaled to minimum–100%. For example minimum 30% and demand 5% gives 33.5% before rounding. Changing a minimum starts a new learned model.",
+        "description": "Set the start of the usable range per radiator. Default 0 preserves existing behavior. Zero demand closes fully; positive demand is rescaled to minimum–100%. For example minimum 30% and demand 5% gives 33.5% before rounding. Changing a minimum preserves samples and PI state unchanged. Learning quality gates still apply; monitor heating response and Last learning result.",
         "data": {"minimum_openings": "Minimum opening per radiator"}
       }
     },
