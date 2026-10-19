@@ -1,6 +1,7 @@
 """Number-only writes, complementary endpoints, bounded recovery and learning gates."""
 
 import asyncio
+import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -9,11 +10,13 @@ from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components.smartpi_calculator.const import (
     CONF_CLOSING,
+    CONF_MIN_OPENING,
     CONF_MODE,
     CONF_OPENING,
     MODE_DIRECT,
     MODE_DISABLED,
     MODE_EXTERNAL,
+    valve_minima,
 )
 from custom_components.smartpi_calculator.coordinator import CalculatorCoordinator
 from custom_components.smartpi_calculator.valve import ValveController, valve_bindings
@@ -181,6 +184,234 @@ async def test_multiple_pairs_receive_same_supported_command(rig):
     assert set(calls) == {(pair[0], 41) for pair in pairs} | {
         (pair[1], 59) for pair in pairs
     }
+
+
+@pytest.mark.parametrize(
+    "demand,opening", [(0, 0), (5, 34), (17, 42), (24, 47), (100, 100)]
+)
+async def test_minimum_rescales_positive_demand_and_zero_still_closes(
+    rig, demand, opening
+):
+    hass, _ = rig
+    controller = ValveController(hass, [PAIR], 1, {PAIR[0]: 30})
+    assert await controller.apply(demand)
+    assert float(hass.states.get(PAIR[0]).state) == opening
+    assert float(hass.states.get(PAIR[1]).state) == 100 - opening
+    assert controller.prepare(demand) == demand
+    assert await controller.close(terminal=True)
+    assert float(hass.states.get(PAIR[0]).state) == 0
+    assert float(hass.states.get(PAIR[1]).state) == 100
+
+
+async def test_per_radiator_mapping_and_rate_hold_stay_in_normalized_space(
+    rig, monkeypatch
+):
+    hass, calls = rig
+    clock = [1000.0]
+    monkeypatch.setattr(
+        "custom_components.smartpi_calculator.valve.time.monotonic", lambda: clock[0]
+    )
+    pair2 = ("number.opening2", "number.closing2")
+    for entity, value in zip(pair2, (0, 100), strict=True):
+        hass.states.async_set(entity, value, ATTRS)
+    controller = ValveController(hass, [PAIR, pair2], 1, {PAIR[0]: 30, pair2[0]: 50})
+    assert await controller.apply(5)
+    assert float(hass.states.get(PAIR[0]).state) == 34
+    assert float(hass.states.get(pair2[0]).state) == 53
+    assert controller.prepare(17) == 5  # never 34 or 53
+    assert await controller.apply(17)
+    assert len(calls) == 4
+    clock[0] += 60
+    assert controller.prepare(17) == 17
+    assert await controller.apply(17)
+    assert float(hass.states.get(PAIR[0]).state) == 42
+    assert float(hass.states.get(pair2[0]).state) == 59
+    # Never map 42 again: it is the physical command, not 17% PI demand.
+    assert controller._demand == 17
+    assert await controller.apply(0)
+    assert controller.confirmed()
+
+
+@pytest.mark.parametrize("step,minimum", [(1, 30.1), (2, 31), (0.5, 99.1)])
+async def test_mapped_endpoints_are_supported_and_never_below_minimum(
+    rig, step, minimum
+):
+    hass, _ = rig
+    controller = ValveController(hass, [PAIR], step, {PAIR[0]: minimum})
+    for demand in range(1, 101):
+        opening = controller.opening_for(PAIR, demand)
+        assert minimum <= opening <= 100
+        assert opening / step == pytest.approx(round(opening / step))
+        assert (100 - opening) / step == pytest.approx(round((100 - opening) / step))
+    assert controller.opening_for(PAIR, 0) == 0
+
+
+@pytest.mark.parametrize(
+    "minimum", [None, True, -0.1, 100, float("inf"), float("nan"), "bad"]
+)
+def test_invalid_minimum_is_rejected(minimum):
+    with pytest.raises(ValueError, match="invalid_minimum_opening"):
+        valve_minima({**SETTINGS, CONF_MIN_OPENING: {PAIR[0]: minimum}})
+
+
+@pytest.mark.parametrize("minima", [[], None, {"number.other": 30}])
+def test_invalid_mapping_is_rejected(minima):
+    with pytest.raises(ValueError, match="invalid_minimum_opening"):
+        valve_minima({**SETTINGS, CONF_MIN_OPENING: minima})
+
+
+@pytest.mark.parametrize("minimum", [0, 30])
+async def test_minimum_is_part_of_persisted_model_binding(rig, minimum):
+    hass, _ = rig
+    settings = {
+        **SETTINGS,
+        CONF_MIN_OPENING: {PAIR[0]: minimum},
+        "temperature_entity": "sensor.room",
+        "target_entity": "sensor.target",
+        "outdoor_entity": "sensor.outside",
+    }
+    coordinator = CalculatorCoordinator(
+        hass, Mock(data=settings, options={}, title="Test", entry_id="test")
+    )
+    coordinator.store = Mock(async_load=AsyncMock(return_value=None))
+    await coordinator.initialize()
+    coordinator.engine.algo.ctl.integral = 1.25
+    stored = json.loads(json.dumps(coordinator._storage_data()))
+    if minimum == 0:
+        assert stored["application"] == [MODE_DIRECT, [PAIR[0]], [PAIR[1]]]
+        coordinator.settings.pop(CONF_MIN_OPENING)  # legacy identity model
+    coordinator.store.async_load.return_value = stored
+    await coordinator.initialize()
+    assert coordinator.engine.algo.ctl.integral == 1.25
+    coordinator.settings[CONF_MIN_OPENING] = {PAIR[0]: minimum + 10}
+    await coordinator.initialize()
+    assert coordinator.engine.algo.ctl.integral != 1.25
+
+
+async def test_mapped_echoes_gate_learning_and_diagnostics_redact_entity_keys(rig):
+    from custom_components.smartpi_calculator.diagnostics import (
+        async_get_config_entry_diagnostics,
+    )
+
+    hass, _ = rig
+    settings = {
+        **SETTINGS,
+        CONF_MIN_OPENING: {PAIR[0]: 30},
+        "temperature_entity": "sensor.room",
+        "target_entity": "sensor.target",
+        "outdoor_entity": "sensor.outside",
+    }
+    coordinator = CalculatorCoordinator(
+        hass, Mock(data=settings, options={}, title="Test", entry_id="test")
+    )
+    coordinator.store = Mock(async_load=AsyncMock(return_value=None))
+    await coordinator.initialize()
+    controller = coordinator.valves
+    assert await controller.apply(5)
+    assert controller.confirmed()
+    hass.states.async_set(PAIR[1], 95, ATTRS)  # normalized complement is NOT an echo
+    assert not controller.confirmed()
+    assert not coordinator.model_diagnostics()["learning_enabled"]
+    hass.states.async_set(PAIR[1], 66, ATTRS)
+    assert controller.confirmed()
+    coordinator.entry.runtime_data = coordinator
+    result = await async_get_config_entry_diagnostics(hass, coordinator.entry)
+    for entity in (*PAIR, "sensor.room", "sensor.target", "sensor.outside"):
+        assert entity not in str(result)
+    assert result["output_space"] == "normalized_demand_percent"
+    assert result["valve_commands"] == [
+        {
+            "minimum_opening_percent": 30,
+            "opening_percent": 34,
+            "closing_percent": 66,
+        }
+    ]
+    # Loss of an endpoint still closes the other, ignoring the configured minimum.
+    hass.states.async_set(PAIR[0], "unavailable", ATTRS)
+    assert not await controller.apply(5)
+    assert float(hass.states.get(PAIR[1]).state) == 100
+
+
+async def test_real_pi_commits_normalized_demand_not_mapped_opening(rig, monkeypatch):
+    from custom_components.smartpi_calculator.engine import Calculator, Inputs
+
+    hass, _ = rig
+    clock = [10000.0]
+    monkeypatch.setattr("time.monotonic", lambda: clock[0])
+    controller = ValveController(hass, [PAIR], 1, {PAIR[0]: 30})
+    engine = Calculator(hass, "Normalized PI")
+    engine.algo.est.a_meas_hist.extend([0.05] * 6)
+    engine.algo.est.b_meas_hist.extend([0.001] * 8)
+    engine.algo.ctl.integral = 1.0
+    output = await engine.step(Inputs(20, 20, 10), command_transform=controller.prepare)
+    assert 0 < output < 100
+    assert await controller.apply(output)
+    opening = float(hass.states.get(PAIR[0]).state)
+    assert opening > output
+    assert engine._command == pytest.approx(output / 100)
+    assert engine.algo.linear_committed_on_percent == pytest.approx(output / 100)
+    clock[0] += 30
+    engine.set_feedback(controller.confirmed())
+    held = await engine.step(Inputs(20, 20, 10), command_transform=controller.prepare)
+    assert held == output
+    assert engine._command_integral == pytest.approx(30 * output / 100)
+    assert await controller.apply(held)
+    assert float(hass.states.get(PAIR[0]).state) == opening
+
+
+async def test_explicit_zero_minimum_matches_legacy_commands(rig):
+    hass, _ = rig
+    legacy = ValveController(hass, [PAIR], 0.1)
+    explicit = ValveController(hass, [PAIR], 0.1, {PAIR[0]: 0})
+    for demand in range(101):
+        assert explicit.opening_for(PAIR, demand) == legacy.opening_for(PAIR, demand)
+
+
+@pytest.mark.parametrize(
+    "divisions",
+    [
+        1,
+        2,
+        4,
+        5,
+        8,
+        10,
+        16,
+        20,
+        25,
+        32,
+        40,
+        50,
+        64,
+        100,
+        125,
+        128,
+        200,
+        250,
+        256,
+        500,
+        1000,
+    ],
+)
+async def test_mapping_invariants_across_supported_grids(rig, divisions):
+    hass, _ = rig
+    for entity in PAIR:
+        hass.states.async_set(entity, "100", {**ATTRS, "step": 100 / divisions})
+    pairs, grid = valve_bindings(hass, SETTINGS)
+    for minimum in (0, 0.1, 17.3, 30, 99.9):
+        controller = ValveController(hass, pairs, grid, {PAIR[0]: minimum})
+        previous = 0
+        for demand in range(1, 101):
+            opening = controller.opening_for(PAIR, demand)
+            assert minimum <= opening <= 100
+            assert opening >= previous
+            assert opening / grid == pytest.approx(round(opening / grid))
+            assert (100 - opening) / grid == pytest.approx(
+                round((100 - opening) / grid)
+            )
+            previous = opening
+        assert controller.opening_for(PAIR, 0) == 0
+        assert controller.opening_for(PAIR, 100) == 100
 
 
 @pytest.mark.parametrize("mode", [MODE_DISABLED, MODE_EXTERNAL, MODE_DIRECT])

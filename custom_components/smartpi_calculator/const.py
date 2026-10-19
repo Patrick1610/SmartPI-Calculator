@@ -13,6 +13,7 @@ CONF_OUTPUT_APPLIED = "output_applied"
 CONF_MODE = "control_mode"
 CONF_OPENING = "opening_entities"
 CONF_CLOSING = "closing_entities"
+CONF_MIN_OPENING = "minimum_openings"
 CONF_HYSTERESIS_ON = "hysteresis_on"
 CONF_HYSTERESIS_OFF = "hysteresis_off"
 DEFAULT_HYSTERESIS_ON = HYST_LOWER_C
@@ -23,6 +24,27 @@ MODE_DISABLED = "learning_disabled"
 SAMPLE_SECONDS = 30
 CYCLE_MINUTES = 10
 SOURCE_KEYS = (CONF_TEMPERATURE, CONF_TARGET, CONF_OUTDOOR)
+
+
+def valve_minima(settings):
+    """Minimum offsets the opening command, not the normalized PI demand."""
+    openings = settings.get(CONF_OPENING, [])
+    raw = settings.get(CONF_MIN_OPENING, {})
+    if not isinstance(raw, dict) or set(raw).difference(openings):
+        raise ValueError("invalid_minimum_opening")
+    values = {}
+    for entity in openings:
+        value = raw.get(entity, 0)
+        if isinstance(value, bool):
+            raise ValueError("invalid_minimum_opening")
+        try:
+            value = float(value)
+        except (ValueError, TypeError) as err:
+            raise ValueError("invalid_minimum_opening") from err
+        if not math.isfinite(value) or not 0 <= value < 100:
+            raise ValueError("invalid_minimum_opening")
+        values[entity] = value
+    return values
 
 
 def hysteresis_margins(settings):

@@ -55,7 +55,7 @@ async def test_real_ha_setup_sensor_unavailable_recovery_and_unload(tmp_path):
                 for s in hass.states.async_all("sensor")
                 if s.entity_id not in ("sensor.room", "sensor.target", "sensor.outside")
             ]
-            assert len(states) == 10
+            assert len(states) == 14
             registry = entity_registry.async_get(hass)
 
             def state(key):
@@ -72,9 +72,31 @@ async def test_real_ha_setup_sensor_unavailable_recovery_and_unload(tmp_path):
             assert float(state("used_outdoor_temperature").state) == 10
             assert state("control_phase").state == "Hysteresis"
             assert state("learning_status").state == "observing"
+            for key in (
+                "base_contribution",
+                "proportional_contribution",
+                "integral_contribution",
+                "predictive_contribution",
+            ):
+                assert state(key).state == "unknown"
+                assert state(key).attributes["unit_of_measurement"] == "%"
+                assert key not in state("demand").attributes
             assert state("valve_control_status").state == "not_configured"
             assert state("learned_heating_samples").state == "0"
             assert state("learned_cooling_samples").state == "0"
+            assert not {
+                "phase",
+                "learning_enabled",
+                "learned_heating_samples",
+                "learned_cooling_samples",
+                "last_learning_result",
+                "valve_status",
+                "input_temperatures_c",
+            }.intersection(state("demand").attributes)
+            assert not {
+                "learned_heating_samples",
+                "learned_cooling_samples",
+            }.intersection(state("learning_status").attributes)
             assert (
                 state("last_learning_result").state
                 == entry.runtime_data.engine.algo.learn_last_reason

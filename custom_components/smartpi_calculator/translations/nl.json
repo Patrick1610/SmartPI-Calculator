@@ -17,14 +17,20 @@
       },
       "valves": {
         "title": "Directe klepaansturing",
-        "description": "Selecteer bestaande number-entiteiten voor opening en closing, in dezelfde volgorde en met evenveel items. Bijvoorbeeld 40% wordt opening 40 / closing 60. Zet de interne Adaptive Mode uit; laat geen andere regeling deze klepwaarden schrijven. RoomMind blijft alleen de doelbron.",
+        "description": "Selecteer bestaande number-entiteiten voor opening en closing, in dezelfde volgorde en met evenveel items. Met minimum 0 wordt 40% opening 40 / closing 60. Stel de minima per radiator op de volgende pagina in. Zet de interne Adaptive Mode uit; laat geen andere regeling deze klepwaarden schrijven. RoomMind blijft alleen de doelbron.",
         "data": {
           "opening_entities": "Opening-entiteiten",
           "closing_entities": "Closing-entiteiten"
         }
+      },
+      "valve_minima": {
+        "title": "Bruikbaar klepbereik",
+        "description": "Stel per radiator het begin van het bruikbare bereik in. Standaard 0 behoudt de bestaande werking. Bij 0% vraag sluit de klep volledig; positieve vraag wordt herschaald naar minimum–100%. Bijvoorbeeld minimum 30% en vraag 5% geeft 33,5% vóór afronding. Wijzigen van een minimum start een nieuw leermodel.",
+        "data": {"minimum_openings": "Minimumopening per radiator"}
       }
     },
     "error": {
+      "invalid_minimum_opening": "Gebruik voor elke geselecteerde radiator een eindig minimum van 0 tot minder dan 100%.",
       "invalid_hysteresis": "Gebruik afstanden van 0 tot 2 °C; niet beide nul. Deze grenzen gelden alleen tijdens Hysteresis, niet voor PI.",
       "invalid_pairs": "Selecteer evenveel opening- en closing-entiteiten; minimaal één paar.",
       "duplicate_valves": "Een klepentiteit mag maar één keer voorkomen.",
@@ -53,14 +59,20 @@
       },
       "valves": {
         "title": "Directe klepaansturing",
-        "description": "Selecteer bestaande number-entiteiten voor opening en closing, in dezelfde volgorde en met evenveel items. Bijvoorbeeld 40% wordt opening 40 / closing 60. Zet de interne Adaptive Mode uit; laat geen andere regeling deze klepwaarden schrijven. RoomMind blijft alleen de doelbron.",
+        "description": "Selecteer bestaande number-entiteiten voor opening en closing, in dezelfde volgorde en met evenveel items. Met minimum 0 wordt 40% opening 40 / closing 60. Stel de minima per radiator op de volgende pagina in. Zet de interne Adaptive Mode uit; laat geen andere regeling deze klepwaarden schrijven. RoomMind blijft alleen de doelbron.",
         "data": {
           "opening_entities": "Opening-entiteiten",
           "closing_entities": "Closing-entiteiten"
         }
+      },
+      "valve_minima": {
+        "title": "Bruikbaar klepbereik",
+        "description": "Stel per radiator het begin van het bruikbare bereik in. Standaard 0 behoudt de bestaande werking. Bij 0% vraag sluit de klep volledig; positieve vraag wordt herschaald naar minimum–100%. Bijvoorbeeld minimum 30% en vraag 5% geeft 33,5% vóór afronding. Wijzigen van een minimum start een nieuw leermodel.",
+        "data": {"minimum_openings": "Minimumopening per radiator"}
       }
     },
     "error": {
+      "invalid_minimum_opening": "Gebruik voor elke geselecteerde radiator een eindig minimum van 0 tot minder dan 100%.",
       "invalid_hysteresis": "Gebruik afstanden van 0 tot 2 °C; niet beide nul. Deze grenzen gelden alleen tijdens Hysteresis, niet voor PI.",
       "invalid_pairs": "Selecteer evenveel opening- en closing-entiteiten; minimaal één paar.",
       "duplicate_valves": "Een klepentiteit mag maar één keer voorkomen.",

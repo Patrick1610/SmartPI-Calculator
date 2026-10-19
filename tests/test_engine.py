@@ -3,6 +3,7 @@
 import ast
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -73,6 +74,73 @@ def test_learning_result_is_the_actual_core_reason():
     engine = Calculator(Mock(), "Reason")
     engine.algo.est.learn_last_reason = "skip: delta too small"
     assert engine.diagnostics()["last_learning_result"] == "skip: delta too small"
+
+
+def test_contributions_are_unknown_before_pi_and_after_interrupt():
+    engine = Calculator(Mock(), "Terms")
+    keys = tuple(engine._empty_contributions())
+    assert all(engine.diagnostics()[key] is None for key in keys)
+    engine.algo._last_ff_result = SimpleNamespace(u_ff_final=0.2)
+    engine.algo.ctl.u_p = 0.1
+    engine._capture_contributions()
+    assert all(engine.diagnostics()[key] is None for key in keys)
+    engine.algo.est.a_meas_hist.extend([0.05] * 6)
+    engine.algo.est.b_meas_hist.extend([0.001] * 8)
+    engine.algo.ctl.u_ff = 0.2
+    engine._capture_contributions()
+    assert engine.diagnostics()["proportional_contribution"] == 10
+    engine.interrupt()
+    assert all(engine.diagnostics()[key] is None for key in keys)
+
+
+@pytest.mark.parametrize(
+    ("base", "runtime_ff", "p", "i"),
+    [(0.15, 0.17, -0.08, 0.05), (0.95, 1.0, 0.2, -0.1), (0.15, 0.15, 0, 0.05)],
+)
+def test_contributions_are_signed_effective_terms_not_raw_prediction(
+    base, runtime_ff, p, i
+):
+    engine = Calculator(Mock(), "Terms")
+    engine.algo.est.a_meas_hist.extend([0.05] * 6)
+    engine.algo.est.b_meas_hist.extend([0.001] * 8)
+    # A suppressed/clipped FF3 candidate must not appear as applied prediction.
+    engine.algo._last_ff_result = SimpleNamespace(u_ff_final=base, u_ff3=0.4)
+    ctl = engine.algo.ctl
+    ctl.u_ff, ctl.u_p, ctl.u_i = runtime_ff, p, i
+    before = dict(vars(ctl))
+    engine._capture_contributions()
+    values = engine.diagnostics()
+    assert values["base_contribution"] == pytest.approx(base * 100)
+    assert values["proportional_contribution"] == pytest.approx(p * 100)
+    assert values["integral_contribution"] == pytest.approx(i * 100)
+    assert values["predictive_contribution"] == pytest.approx((runtime_ff - base) * 100)
+    assert sum(values[key] for key in engine._empty_contributions()) == pytest.approx(
+        (runtime_ff + p + i) * 100
+    )
+    assert vars(ctl) == before
+    engine.algo.guards._guard_cut_active = True
+    engine._capture_contributions()
+    assert all(
+        engine.diagnostics()[key] is None for key in engine._empty_contributions()
+    )
+
+
+async def test_stable_term_observation_does_not_change_outputs_or_pi_state(clock):
+    engines = [Calculator(Mock(), "Same"), Calculator(Mock(), "Same")]
+    engines[1]._capture_contributions = lambda: None
+    for engine in engines:
+        engine.algo.est.a_meas_hist.extend([0.05] * 6)
+        engine.algo.est.b_meas_hist.extend([0.001] * 8)
+        engine.algo.ctl.integral = 1.0
+    for room in (19, 19.9, 20.0, 20.2, 19.95):
+        outputs = [await engine.step(Inputs(room, 20, 10)) for engine in engines]
+        assert outputs[0] == pytest.approx(outputs[1])
+        assert vars(engines[0].algo.ctl) == vars(engines[1].algo.ctl)
+        assert engines[0].algo.a == engines[1].algo.a
+        assert engines[0].algo.b == engines[1].algo.b
+        assert engines[0].algo.meas_count_a == engines[1].algo.meas_count_a
+        assert engines[0].algo.meas_count_b == engines[1].algo.meas_count_b
+        clock[0] += 30
 
 
 async def test_custom_bootstrap_thresholds_do_not_change_stable_pi(clock):

@@ -18,6 +18,7 @@ from custom_components.smartpi_calculator.const import (
     CONF_CLOSING,
     CONF_HYSTERESIS_OFF,
     CONF_HYSTERESIS_ON,
+    CONF_MIN_OPENING,
     CONF_MODE,
     CONF_OPENING,
     CONF_OUTDOOR,
@@ -117,8 +118,11 @@ async def test_direct_flow_requires_two_valid_lists_before_creating_entry(tmp_pa
     result = await flow.async_step_valves(
         {CONF_OPENING: ["number.opening"], CONF_CLOSING: ["number.closing"]}
     )
+    assert result["step_id"] == "valve_minima"
+    result = await flow.async_step_valve_minima({CONF_MIN_OPENING: {}})
     assert result["data"][CONF_MODE] == MODE_DIRECT
     assert result["data"][CONF_OPENING] == ["number.opening"]
+    assert result["data"][CONF_MIN_OPENING] == {"number.opening": 0}
     await flow.hass.async_stop()
 
 
@@ -153,6 +157,7 @@ async def test_switching_out_of_direct_clears_saved_valve_binding(tmp_path):
             CONF_MODE: MODE_DIRECT,
             CONF_OPENING: ["number.opening"],
             CONF_CLOSING: ["number.closing"],
+            CONF_MIN_OPENING: {"number.opening": 30},
         },
         options={},
     )
@@ -161,6 +166,7 @@ async def test_switching_out_of_direct_clears_saved_valve_binding(tmp_path):
     result = await flow.async_step_init({**SOURCES, CONF_MODE: MODE_DISABLED})
     assert result["data"][CONF_OPENING] == []
     assert result["data"][CONF_CLOSING] == []
+    assert result["data"][CONF_MIN_OPENING] == {}
     await flow.hass.async_stop()
 
 
@@ -227,9 +233,111 @@ async def test_direct_options_keep_custom_hysteresis_through_valve_step(tmp_path
         flow.hass.states.async_set(
             "number." + key, "100", {"min": 0, "max": 100, "step": 1}
         )
-    saved = await flow.async_step_valves(
+    minima = await flow.async_step_valves(
         {CONF_OPENING: ["number.opening"], CONF_CLOSING: ["number.closing"]}
+    )
+    assert minima["step_id"] == "valve_minima"
+    saved = await flow.async_step_valve_minima(
+        {CONF_MIN_OPENING: {"number.opening": 30}}
     )
     assert saved["data"][CONF_HYSTERESIS_ON] == 0.2
     assert saved["data"][CONF_HYSTERESIS_OFF] == 0
+    assert saved["data"][CONF_MIN_OPENING] == {"number.opening": 30}
     await flow.hass.async_stop()
+
+
+@pytest.mark.parametrize(
+    "invalid", [True, None, -1, 100, float("nan"), float("inf"), "bad"]
+)
+@pytest.mark.parametrize("options", [False, True])
+async def test_invalid_minima_redisplay_serializes_safely(tmp_path, invalid, options):
+    flow = OptionsFlow() if options else ConfigFlow()
+    flow.hass = HomeAssistant(str(tmp_path))
+    flow.hass.config_entries = Mock()
+    flow.hass.config_entries.async_entries.return_value = []
+    if options:
+        flow.handler = "entry"
+        flow.hass.config_entries.async_get_known_entry.return_value = Mock(
+            entry_id="entry", data=SOURCES, options={}
+        )
+    flow._pending = {
+        **SOURCES,
+        CONF_MODE: MODE_DIRECT,
+        CONF_OPENING: ["number.opening"],
+        CONF_CLOSING: ["number.closing"],
+    }
+    result = await flow.async_step_valve_minima(
+        {CONF_MIN_OPENING: {"number.opening": invalid}}
+    )
+    assert result["errors"] == {"base": "invalid_minimum_opening"}
+    serialized = probatio.to_field_list(
+        result["data_schema"], custom_serializer=cv.custom_serializer
+    )
+    json.loads(json.dumps(serialized, allow_nan=False))
+    flow.hass.config_entries.async_update_entry.assert_not_called()
+    await flow.hass.async_stop()
+
+
+async def test_minima_options_bind_to_entity_not_selection_order(tmp_path):
+    from custom_components.smartpi_calculator.config_flow import minima_schema
+
+    flow = OptionsFlow()
+    flow.handler = "entry"
+    flow.hass = HomeAssistant(str(tmp_path))
+    flow.hass.config_entries = Mock()
+    old = {
+        **SOURCES,
+        CONF_MODE: MODE_DIRECT,
+        CONF_OPENING: ["number.old", "number.keep"],
+        CONF_CLOSING: ["number.cold", "number.ckeep"],
+        CONF_MIN_OPENING: {"number.old": 40, "number.keep": 30},
+    }
+    current = Mock(entry_id="entry", data=old, options={})
+    flow.hass.config_entries.async_get_known_entry.return_value = current
+    flow.hass.config_entries.async_entries.return_value = [current]
+    await flow.async_step_init({**SOURCES, CONF_MODE: MODE_DIRECT})
+    for entity in ("number.new", "number.keep", "number.cnew", "number.ckeep"):
+        flow.hass.states.async_set(
+            entity,
+            "100",
+            {"min": 0, "max": 100, "step": 1, "friendly_name": entity + " label"},
+        )
+    result = await flow.async_step_valves(
+        {
+            CONF_OPENING: ["number.keep", "number.new"],
+            CONF_CLOSING: ["number.ckeep", "number.cnew"],
+        }
+    )
+    assert result["step_id"] == "valve_minima"
+    validated = result["data_schema"]({})
+    assert validated[CONF_MIN_OPENING] == {"number.keep": 30, "number.new": 0}
+    selector = next(iter(minima_schema(flow.hass, flow._pending).schema.values()))
+    fields = selector.config["fields"]
+    assert fields["number.keep"]["label"] == "number.keep label"
+    assert fields["number.new"]["default"] == 0
+    # Binding is rechecked even if another instance claims it while the form is open.
+    other = Mock(
+        entry_id="other", data={**old, CONF_OPENING: ["number.new"]}, options={}
+    )
+    flow.hass.config_entries.async_entries.return_value = [current, other]
+    rejected = await flow.async_step_valve_minima(validated)
+    assert rejected["errors"]["base"] == "valve_in_use"
+    flow.hass.config_entries.async_entries.return_value = [current]
+    saved = await flow.async_step_valve_minima(validated)
+    assert saved["data"][CONF_MIN_OPENING] == {"number.keep": 30, "number.new": 0}
+    await flow.hass.async_stop()
+
+
+async def test_minima_error_preserves_other_valid_fields(tmp_path):
+    from custom_components.smartpi_calculator.config_flow import minima_schema
+
+    hass = HomeAssistant(str(tmp_path))
+    settings = {
+        CONF_OPENING: ["number.bad", "number.good"],
+        CONF_MIN_OPENING: {"number.bad": float("nan"), "number.good": 31.7},
+    }
+    form = minima_schema(hass, settings)
+    assert form({})[CONF_MIN_OPENING] == {"number.bad": 0, "number.good": 31.7}
+    serialized = probatio.to_field_list(form, custom_serializer=cv.custom_serializer)
+    json.loads(json.dumps(serialized, allow_nan=False))
+    await hass.async_stop()

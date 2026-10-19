@@ -17,14 +17,20 @@
       },
       "valves": {
         "title": "Direct valve control",
-        "description": "Select existing opening and closing number entities in matching order and equal counts. For example 40% becomes opening 40 / closing 60. Disable native Adaptive Mode and other writers of these valve values. RoomMind remains the target source.",
+        "description": "Select existing opening and closing number entities in matching order and equal counts. With minimum 0, 40% becomes opening 40 / closing 60. Set per-radiator minima on the next page. Disable native Adaptive Mode and other writers of these valve values. RoomMind remains the target source.",
         "data": {
           "opening_entities": "Opening entities",
           "closing_entities": "Closing entities"
         }
+      },
+      "valve_minima": {
+        "title": "Usable valve range",
+        "description": "Set the start of the usable range per radiator. Default 0 preserves existing behavior. Zero demand closes fully; positive demand is rescaled to minimum–100%. For example minimum 30% and demand 5% gives 33.5% before rounding. Changing a minimum starts a new learned model.",
+        "data": {"minimum_openings": "Minimum opening per radiator"}
       }
     },
     "error": {
+      "invalid_minimum_opening": "Use a finite minimum from 0 to less than 100% for each selected radiator.",
       "invalid_hysteresis": "Use distances from 0 to 2 °C, not both zero. These thresholds apply only during Hysteresis, not PI.",
       "invalid_pairs": "Select an equal, nonzero number of opening and closing entities.",
       "duplicate_valves": "Each valve entity must be unique.",
@@ -53,14 +59,20 @@
       },
       "valves": {
         "title": "Direct valve control",
-        "description": "Select existing opening and closing number entities in matching order and equal counts. For example 40% becomes opening 40 / closing 60. Disable native Adaptive Mode and other writers of these valve values. RoomMind remains the target source.",
+        "description": "Select existing opening and closing number entities in matching order and equal counts. With minimum 0, 40% becomes opening 40 / closing 60. Set per-radiator minima on the next page. Disable native Adaptive Mode and other writers of these valve values. RoomMind remains the target source.",
         "data": {
           "opening_entities": "Opening entities",
           "closing_entities": "Closing entities"
         }
+      },
+      "valve_minima": {
+        "title": "Usable valve range",
+        "description": "Set the start of the usable range per radiator. Default 0 preserves existing behavior. Zero demand closes fully; positive demand is rescaled to minimum–100%. For example minimum 30% and demand 5% gives 33.5% before rounding. Changing a minimum starts a new learned model.",
+        "data": {"minimum_openings": "Minimum opening per radiator"}
       }
     },
     "error": {
+      "invalid_minimum_opening": "Use a finite minimum from 0 to less than 100% for each selected radiator.",
       "invalid_hysteresis": "Use distances from 0 to 2 °C, not both zero. These thresholds apply only during Hysteresis, not PI.",
       "invalid_pairs": "Select an equal, nonzero number of opening and closing entities.",
       "duplicate_valves": "Each valve entity must be unique.",

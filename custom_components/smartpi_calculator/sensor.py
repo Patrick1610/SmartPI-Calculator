@@ -11,6 +11,13 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, MODE_DIRECT, MODE_EXTERNAL, UPSTREAM_COMMIT
 
+CONTRIBUTION_NAMES = {
+    "base_contribution": "Base contribution",
+    "proportional_contribution": "Proportional contribution",
+    "integral_contribution": "Integral contribution",
+    "predictive_contribution": "Predictive contribution",
+}
+
 
 async def async_setup_entry(hass, entry, async_add_entities):
     async_add_entities(
@@ -26,6 +33,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             LearningSampleSensor(entry, "heating"),
             LearningSampleSensor(entry, "cooling"),
             LastLearningResultSensor(entry),
+            *[ContributionSensor(entry, key) for key in CONTRIBUTION_NAMES],
         ]
     )
 
@@ -60,20 +68,41 @@ class DemandSensor(CalculatorSensor):
     @property
     def extra_state_attributes(self):
         return {
-            **self.coordinator.model_diagnostics(),
+            **{
+                key: value
+                for key, value in self.coordinator.model_diagnostics().items()
+                if key
+                not in {
+                    "phase",
+                    "learning_enabled",
+                    "learned_heating_samples",
+                    "learned_cooling_samples",
+                    "last_learning_result",
+                    *CONTRIBUTION_NAMES,
+                }
+            },
             "upstream_commit": UPSTREAM_COMMIT,
             "control_mode": self.coordinator.mode,
-            "valve_status": self.coordinator.valves.status
-            if self.coordinator.valves
-            else "not_configured",
-            "input_temperatures_c": None
-            if self.coordinator.inputs is None
-            else {
-                "room": self.coordinator.inputs.temperature,
-                "target": self.coordinator.inputs.target,
-                "outdoor": self.coordinator.inputs.outdoor,
-            },
         }
+
+
+class ContributionSensor(CalculatorSensor):
+    """Signed percentage-point terms before command/output constraints."""
+
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 2
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:calculator-variant-outline"
+
+    def __init__(self, entry, key):
+        super().__init__(entry, key)
+        self._key = key
+        self._attr_name = CONTRIBUTION_NAMES[key]
+
+    @property
+    def native_value(self):
+        return self.coordinator.model_diagnostics()[self._key]
 
 
 class InputTemperatureSensor(CalculatorSensor):
@@ -141,14 +170,7 @@ class LearningStatusSensor(CalculatorSensor):
     @property
     def extra_state_attributes(self):
         diagnostics = self.coordinator.model_diagnostics()
-        return {
-            key: diagnostics[key]
-            for key in (
-                "feedback",
-                "learned_heating_samples",
-                "learned_cooling_samples",
-            )
-        }
+        return {"feedback": diagnostics["feedback"]}
 
 
 class ValveStatusSensor(CalculatorSensor):

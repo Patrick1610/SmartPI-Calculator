@@ -27,6 +27,7 @@ from .const import (
     UPSTREAM_COMMIT,
     control_mode,
     hysteresis_margins,
+    valve_minima,
 )
 from .engine import Calculator, Inputs
 from .valve import ValveController, valve_bindings
@@ -50,10 +51,18 @@ class CalculatorCoordinator(DataUpdateCoordinator[float]):
         self.inputs: Inputs | None = None
         self.mode = control_mode(self.settings)
         self.valves = None
+        self.minima = {}
         self._control_lock = asyncio.Lock()
         self._stopping = False
 
     async def initialize(self):
+        if self.mode == MODE_DIRECT:
+            try:
+                self.minima = valve_minima(self.settings)
+            except ValueError as err:
+                raise ConfigEntryError("Invalid minimum valve openings") from err
+        else:
+            self.minima = {}
         saved = await self.store.async_load()
         binding = [self.settings[k] for k in (CONF_TEMPERATURE, CONF_OUTDOOR)]
         state = (
@@ -93,7 +102,7 @@ class CalculatorCoordinator(DataUpdateCoordinator[float]):
                 ):
                     raise ConfigEntryNotReady("Valve entities are not ready") from err
                 raise ConfigEntryError(str(err)) from err
-            self.valves = ValveController(self.hass, pairs, step)
+            self.valves = ValveController(self.hass, pairs, step, self.minima)
 
     def _read_temperature(self, key):
         state = self.hass.states.get(self.settings[key])
@@ -155,11 +164,15 @@ class CalculatorCoordinator(DataUpdateCoordinator[float]):
         }
 
     def _application_binding(self):
-        return [
+        binding = [
             self.mode,
             self.settings.get(CONF_OPENING, []),
             self.settings.get(CONF_CLOSING, []),
         ]
+        nonzero = [[e, v] for e, v in sorted(self.minima.items()) if v != 0]
+        # Preserve legacy model binding for the identity mapping, including
+        # explicitly configured zeros. A changed curve is a different plant.
+        return binding + [nonzero] if nonzero else binding
 
     def model_diagnostics(self):
         data = self.engine.diagnostics()

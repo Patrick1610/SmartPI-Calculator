@@ -81,6 +81,42 @@ class Calculator:
         self._interrupted = False
         self._feedback = "assumed_1_to_1" if output_applied else "virtual_not_applied"
         self._cycle_learning_valid = output_applied
+        self._contributions = self._empty_contributions()
+
+    @staticmethod
+    def _empty_contributions():
+        return dict.fromkeys(
+            (
+                "base_contribution",
+                "proportional_contribution",
+                "integral_contribution",
+                "predictive_contribution",
+            )
+        )
+
+    def _capture_contributions(self):
+        """Snapshot the last PI evaluation; never recalculate or alter control."""
+        self._contributions = self._empty_contributions()
+        ff = self.algo._last_ff_result
+        if (
+            self.algo.phase.value != "Stable"
+            or ff is None
+            or self.algo.guards.guard_cut_active
+        ):
+            return
+        ctl = self.algo.ctl
+        values = (
+            ff.u_ff_final,
+            ctl.u_p,
+            ctl.u_i,
+            # Use runtime FF, not the raw FF3 candidate: deadband suppression
+            # and feed-forward clamping must not be shown as applied prediction.
+            ctl.u_ff - ff.u_ff_final,
+        )
+        if all(math.isfinite(value) for value in values):
+            self._contributions = dict(
+                zip(self._contributions, (value * 100 for value in values), strict=True)
+            )
 
     def set_feedback(self, confirmed):
         """Discard uncertain cycles before allowing further model learning."""
@@ -108,6 +144,7 @@ class Calculator:
         self._command = 0.0
         self._interrupted = True
         self._cycle_learning_valid = False
+        self._contributions = self._empty_contributions()
 
     async def step(self, inputs: Inputs, *, command_transform=None) -> float:
         now = time.monotonic()
@@ -146,6 +183,7 @@ class Calculator:
             cycle_boundary=boundary,
             temperature_measure_id=inputs.measurement_id,
         )
+        self._capture_contributions()
         command = self.algo.on_percent
         if not math.isfinite(command) or not 0 <= command <= 1:
             self.interrupt()
@@ -187,6 +225,7 @@ class Calculator:
 
     def diagnostics(self) -> dict:
         return {
+            **self._contributions,
             "phase": self.algo.phase.value,
             "learning_enabled": self.algo.learning_enabled,
             "feedback": self._feedback,

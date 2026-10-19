@@ -10,6 +10,8 @@ from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
+    ObjectSelector,
+    ObjectSelectorConfig,
     SelectOptionDict,
     SelectSelector,
     SelectSelectorConfig,
@@ -20,6 +22,7 @@ from .const import (
     CONF_CLOSING,
     CONF_HYSTERESIS_OFF,
     CONF_HYSTERESIS_ON,
+    CONF_MIN_OPENING,
     CONF_MODE,
     CONF_OPENING,
     CONF_OUTPUT_APPLIED,
@@ -32,6 +35,7 @@ from .const import (
     SOURCE_KEYS,
     control_mode,
     hysteresis_margins,
+    valve_minima,
 )
 from .valve import valve_bindings
 
@@ -90,6 +94,47 @@ def valve_schema(defaults):
     )
 
 
+def minima_schema(hass, settings):
+    raw = settings.get(CONF_MIN_OPENING, {})
+    raw = raw if isinstance(raw, dict) else {}
+    defaults = {}
+    for entity in settings[CONF_OPENING]:
+        try:
+            defaults.update(
+                valve_minima(
+                    {
+                        CONF_OPENING: [entity],
+                        CONF_MIN_OPENING: {entity: raw.get(entity, 0)},
+                    }
+                )
+            )
+        except ValueError:
+            defaults[entity] = 0
+    fields = {}
+    for entity in settings[CONF_OPENING]:
+        state = hass.states.get(entity)
+        fields[entity] = {
+            "label": state.name if state is not None else entity,
+            "default": defaults[entity],
+            "selector": NumberSelector(
+                NumberSelectorConfig(
+                    min=0,
+                    max=99.9,
+                    step=0.1,
+                    mode=NumberSelectorMode.BOX,
+                    unit_of_measurement="%",
+                )
+            ),
+        }
+    return vol.Schema(
+        {
+            vol.Required(CONF_MIN_OPENING, default=defaults): ObjectSelector(
+                ObjectSelectorConfig(fields=fields)
+            )
+        }
+    )
+
+
 class ModeFlow:
     """Shared validation and pending state for creation and options."""
 
@@ -104,6 +149,7 @@ class ModeFlow:
         if values[CONF_MODE] != MODE_DIRECT:
             values.pop(CONF_OPENING, None)
             values.pop(CONF_CLOSING, None)
+            values.pop(CONF_MIN_OPENING, None)
         return values
 
     async def async_step_valves(self, user_input=None):
@@ -115,12 +161,37 @@ class ModeFlow:
             except ValueError as err:
                 errors["base"] = str(err)
             else:
-                return self._finish(values)
+                previous = self._defaults().get(CONF_MIN_OPENING, {})
+                values[CONF_MIN_OPENING] = {
+                    entity: previous[entity]
+                    for entity in values[CONF_OPENING]
+                    if isinstance(previous, dict) and entity in previous
+                }
+                self._pending = values
+                return await self.async_step_valve_minima()
         return self.async_show_form(
             step_id="valves",
             data_schema=valve_schema(
                 user_input if user_input is not None else self._defaults()
             ),
+            errors=errors,
+        )
+
+    async def async_step_valve_minima(self, user_input=None):
+        errors = {}
+        values = dict(self._pending)
+        if user_input is not None:
+            values[CONF_MIN_OPENING] = user_input.get(CONF_MIN_OPENING, {})
+            try:
+                values[CONF_MIN_OPENING] = valve_minima(values)
+                valve_bindings(self.hass, values, exclude_entry=self._entry_id())
+            except ValueError as err:
+                errors["base"] = str(err)
+            else:
+                return self._finish(values)
+        return self.async_show_form(
+            step_id="valve_minima",
+            data_schema=minima_schema(self.hass, values),
             errors=errors,
         )
 
@@ -192,7 +263,14 @@ class OptionsFlow(ModeFlow, config_entries.OptionsFlow):
                     return self.async_abort(reason="already_configured")
             if self._pending[CONF_MODE] == MODE_DIRECT:
                 return await self.async_step_valves()
-            return self._finish({**self._pending, CONF_OPENING: [], CONF_CLOSING: []})
+            return self._finish(
+                {
+                    **self._pending,
+                    CONF_OPENING: [],
+                    CONF_CLOSING: [],
+                    CONF_MIN_OPENING: {},
+                }
+            )
         return self.async_show_form(
             step_id="init", data_schema=schema(self._defaults(), options=True)
         )

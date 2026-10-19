@@ -9,11 +9,13 @@ from fractions import Fraction
 
 from .const import (
     CONF_CLOSING,
+    CONF_MIN_OPENING,
     CONF_OPENING,
     DOMAIN,
     MODE_DIRECT,
     SOURCE_KEYS,
     control_mode,
+    valve_minima,
 )
 
 SEND_INTERVAL = 60
@@ -67,10 +69,17 @@ def valve_bindings(hass, settings, *, exclude_entry=None):
 class ValveController:
     """Send complementary endpoints and confirm numeric echoes, not physical heat."""
 
-    def __init__(self, hass, pairs, step):
+    def __init__(self, hass, pairs, step, minima=None):
         self.hass, self.pairs, self.step = hass, pairs, step
+        self.minima = valve_minima(
+            {
+                CONF_OPENING: [p[0] for p in pairs],
+                CONF_MIN_OPENING: {} if minima is None else minima,
+            }
+        )
         self._last_send = {}
         self._expected = None
+        self._demand = 0.0
         self._lock = asyncio.Lock()
         self._terminal = False
         self._failed = False
@@ -86,13 +95,38 @@ class ValveController:
         return min(100.0, max(0.0, math.floor(percent / self.step + 0.5) * self.step))
 
     def prepare(self, percent):
-        """Commit the held command, not a new candidate suppressed by rate limiting."""
+        """Return normalized demand; never feed a mapped valve position to PI."""
         value = self.quantize(percent)
         if value and self._expected and self._last_send:
             last = max(sent[0] for sent in self._last_send.values())
             if time.monotonic() - last < SEND_INTERVAL:
-                return self._expected[self.pairs[0][0]]
+                return self._demand
         return value
+
+    def opening_for(self, pair, demand):
+        if demand == 0:
+            return 0.0
+        minimum = self.minima[pair[0]]
+        opening = self.quantize(minimum + (100 - minimum) * demand / 100)
+        minimum_supported = (
+            math.ceil(Fraction(str(minimum)) / Fraction(str(self.step))) * self.step
+        )
+        return max(minimum_supported, opening)
+
+    def command_diagnostics(self):
+        """Existing number entities carry history; this is a redacted snapshot."""
+        return [
+            {
+                "minimum_opening_percent": self.minima[pair[0]],
+                "opening_percent": None
+                if self._expected is None
+                else self._expected[pair[0]],
+                "closing_percent": None
+                if self._expected is None
+                else self._expected[pair[1]],
+            }
+            for pair in self.pairs
+        ]
 
     def _value(self, entity_id):
         state = self.hass.states.get(entity_id)
@@ -160,21 +194,25 @@ class ValveController:
 
     async def _apply(self, percent, *, force_close=False, bypass_interval=False):
         self._failed = False
-        opening = 0 if force_close else self.prepare(percent)
+        demand = 0 if force_close else self.prepare(percent)
         unavailable = any(self._value(entity) is None for entity in self.entity_ids)
         if unavailable:
-            opening = 0.0
+            demand = 0.0
+        self._demand = demand
+        openings = {pair[0]: self.opening_for(pair, demand) for pair in self.pairs}
         self._expected = {
             entity: value
             for pair in self.pairs
-            for entity, value in zip(pair, (opening, 100 - opening), strict=True)
+            for entity, value in zip(
+                pair, (openings[pair[0]], 100 - openings[pair[0]]), strict=True
+            )
         }
         results = await asyncio.gather(
             *(
                 self._send_pair(
                     pair,
-                    opening,
-                    force_close or unavailable or opening == 0,
+                    openings[pair[0]],
+                    force_close or unavailable or demand == 0,
                     bypass_interval,
                 )
                 for pair in self.pairs
