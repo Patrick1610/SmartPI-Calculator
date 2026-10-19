@@ -13,7 +13,7 @@ def test_hacs_package_metadata_and_brand():
     manifest = json.loads((COMPONENT / "manifest.json").read_text())
     assert manifest["integration_type"] == "service"
     assert manifest["config_flow"] is True
-    assert manifest["version"] == "0.2.3"
+    assert manifest["version"] == "0.2.4"
     for key in ("domain", "documentation", "issue_tracker", "codeowners", "name"):
         assert manifest[key]
     assert json.loads((ROOT / "hacs.json").read_text())["homeassistant"] == "2026.10.0"
@@ -32,6 +32,7 @@ def test_hysteresis_labels_and_errors_exist_in_both_flows():
         *sorted((COMPONENT / "translations").glob("*.json")),
     ):
         text = json.loads(path.read_text(), object_pairs_hook=unique_keys)
+        assert text["entity"]["sensor"]["unbounded_pi_demand"]["name"]
         for kind, step in (("config", "user"), ("options", "init")):
             assert "hysteresis_on" in text[kind]["step"][step]["data"]
             assert "hysteresis_off" in text[kind]["step"][step]["data"]

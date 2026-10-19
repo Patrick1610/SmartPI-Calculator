@@ -1,7 +1,9 @@
 """Load/unload the real integration in an isolated, temporary HA instance."""
 
 import asyncio
+from copy import deepcopy
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from homeassistant import loader
@@ -21,11 +23,18 @@ from custom_components.smartpi_calculator.const import (
 )
 
 
-async def test_real_ha_setup_sensor_unavailable_recovery_and_unload(tmp_path):
+@pytest.mark.parametrize(
+    ("language", "raw_name"),
+    [("en", "Unbounded PI demand"), ("nl", "Onbegrensde PI-vraag")],
+)
+async def test_real_ha_setup_sensor_unavailable_recovery_and_unload(
+    tmp_path, language, raw_name
+):
     (tmp_path / "custom_components").symlink_to(
         Path(__file__).resolve().parents[1] / "custom_components"
     )
     hass = HomeAssistant(str(tmp_path))
+    hass.config.language = language
     loader.async_setup(hass)
     frame.async_setup(hass)
     hass.config_entries = ConfigEntries(hass, {})
@@ -61,7 +70,7 @@ async def test_real_ha_setup_sensor_unavailable_recovery_and_unload(tmp_path):
                 for s in hass.states.async_all("sensor")
                 if s.entity_id not in ("sensor.room", "sensor.target", "sensor.outside")
             ]
-            assert len(states) == 14
+            assert len(states) == 15
             registry = entity_registry.async_get(hass)
 
             def state(key):
@@ -87,6 +96,59 @@ async def test_real_ha_setup_sensor_unavailable_recovery_and_unload(tmp_path):
                 assert state(key).state == "unknown"
                 assert state(key).attributes["unit_of_measurement"] == "%"
                 assert key not in state("demand").attributes
+            assert state("unbounded_pi_demand").state == "unknown"
+            assert state("unbounded_pi_demand").attributes["unit_of_measurement"] == "%"
+            assert (
+                state("unbounded_pi_demand").attributes["state_class"] == "measurement"
+            )
+            assert (
+                state("unbounded_pi_demand")
+                .attributes["friendly_name"]
+                .endswith(raw_name)
+            )
+            assert "unbounded_pi_demand" not in state("demand").attributes
+            # Exercise HA state publication from a coherent cached diagnostic
+            # snapshot, without changing the actual controller's command/model.
+            coordinator = entry.runtime_data
+            snapshot = coordinator.model_diagnostics()
+
+            def control_and_learned_state():
+                # save_state projects monotonic timestamps to wall time on each
+                # call; compare actual control/model memory, not that projection.
+                algo = coordinator.engine.algo
+                return deepcopy(
+                    (
+                        vars(algo.ctl),
+                        algo.a,
+                        algo.b,
+                        list(algo.est.a_meas_hist),
+                        list(algo.est.b_meas_hist),
+                    )
+                )
+
+            model_before = control_and_learned_state()
+            with patch.object(coordinator, "model_diagnostics", return_value=snapshot):
+                for base, p, expected in (
+                    (4.49, -25.09, -20.60),
+                    (95, 25, 120),
+                    (0, 0, 0),
+                ):
+                    snapshot.update(
+                        base_contribution=base,
+                        proportional_contribution=p,
+                        integral_contribution=0,
+                        predictive_contribution=0,
+                    )
+                    coordinator.async_set_updated_data(coordinator.data)
+                    await hass.async_block_till_done()
+                    assert float(state("unbounded_pi_demand").state) == pytest.approx(
+                        expected
+                    )
+                    assert float(state("demand").state) == 100
+                    assert control_and_learned_state() == model_before
+            coordinator.async_set_updated_data(coordinator.data)
+            await hass.async_block_till_done()
+            assert state("unbounded_pi_demand").state == "unknown"
             assert state("valve_control_status").state == "not_configured"
             assert state("learned_heating_samples").state == "0"
             assert state("learned_cooling_samples").state == "0"

@@ -14,6 +14,7 @@ from custom_components.smartpi_calculator.sensor import (
     LastLearningResultSensor,
     LearningSampleSensor,
     LearningStatusSensor,
+    UnboundedPIDemandSensor,
     ValveStatusSensor,
 )
 
@@ -96,6 +97,59 @@ def test_valve_failure_stays_visible_during_calculation_failure():
     assert sensor.native_value == "unavailable"
     coordinator.valves = None
     assert sensor.native_value == "not_configured"
+
+
+@pytest.mark.parametrize(
+    ("terms", "expected"),
+    [
+        ((4.49, -25.09, 0.0, 0.0), -20.60),
+        ((15.0, 8.0, 5.0, 2.0), 30.0),
+        ((95.0, 20.0, 5.0, 0.0), 120.0),
+        ((0.0, 0.0, 0.0, 0.0), 0.0),
+    ],
+)
+def test_unbounded_pi_demand_is_signed_uncapped_and_read_only(terms, expected):
+    diagnostics = dict(zip(CONTRIBUTION_NAMES, terms, strict=True))
+    original = dict(diagnostics)
+    coordinator = Mock(data=17.0, last_update_success=True)
+    coordinator.model_diagnostics.return_value = diagnostics
+    sensor = UnboundedPIDemandSensor(entry(coordinator))
+    assert sensor.unique_id == "test_unbounded_pi_demand"
+    assert sensor.translation_key == "unbounded_pi_demand"
+    assert sensor.native_value == pytest.approx(expected)
+    coordinator.model_diagnostics.assert_called_once_with()
+    assert diagnostics == original
+    assert coordinator.data == 17.0
+    assert sensor.native_unit_of_measurement == "%"
+    assert sensor.state_class is SensorStateClass.MEASUREMENT
+    assert sensor.entity_category is EntityCategory.DIAGNOSTIC
+    assert sensor.suggested_display_precision == 2
+    coordinator.last_update_success = False
+    assert not sensor.available
+
+
+@pytest.mark.parametrize(
+    "bad", [None, float("nan"), float("inf"), -float("inf"), "unknown"]
+)
+def test_unbounded_pi_demand_never_zero_fills_invalid_terms(bad):
+    diagnostics = dict.fromkeys(CONTRIBUTION_NAMES, 0.0)
+    diagnostics["integral_contribution"] = bad
+    coordinator = Mock(last_update_success=True)
+    coordinator.model_diagnostics.return_value = diagnostics
+    assert UnboundedPIDemandSensor(entry(coordinator)).native_value is None
+
+
+def test_unbounded_pi_demand_missing_term_and_overflow_are_unknown():
+    coordinator = Mock(last_update_success=True)
+    diagnostics = dict.fromkeys(CONTRIBUTION_NAMES, 0.0)
+    del diagnostics["predictive_contribution"]
+    coordinator.model_diagnostics.return_value = diagnostics
+    sensor = UnboundedPIDemandSensor(entry(coordinator))
+    assert sensor.native_value is None
+    coordinator.model_diagnostics.return_value = dict.fromkeys(
+        CONTRIBUTION_NAMES, 1e308
+    )
+    assert sensor.native_value is None
 
 
 def test_sample_counts_are_current_core_counts_not_invented_lifetime_totals():
