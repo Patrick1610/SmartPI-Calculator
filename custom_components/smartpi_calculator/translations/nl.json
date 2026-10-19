@@ -1,5 +1,10 @@
 {
   "title": "SmartPI Calculator",
+  "entity": {
+    "sensor": {
+      "unbounded_pi_demand": {"name": "Onbegrensde PI-vraag"}
+    }
+  },
   "config": {
     "step": {
       "user": {
