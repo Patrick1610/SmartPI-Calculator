@@ -15,6 +15,7 @@ from homeassistant.util.unit_conversion import TemperatureConverter
 
 from .const import (
     CONF_CLOSING,
+    CONF_MIN_OPENING,
     CONF_OPENING,
     CONF_OUTDOOR,
     CONF_TARGET,
@@ -69,13 +70,21 @@ class CalculatorCoordinator(DataUpdateCoordinator[float]):
             saved.get("algorithm")
             if isinstance(saved, dict)
             and saved.get("sources") == binding
-            and saved.get(
-                "application",
-                self._application_binding() if self.mode != MODE_DIRECT else None,
-            )
-            == self._application_binding()
+            and self._compatible_application(saved)
             else None
         )
+        if (
+            state is not None
+            and self.mode == MODE_DIRECT
+            and saved.get("application") != self._application_binding()
+        ):
+            _LOGGER.warning(
+                "%s: valve minimums changed; retaining learned samples and PI "
+                "state unchanged. Existing learning quality gates still apply; "
+                "heating outliers cannot recenter until cooling converges. "
+                "Monitor the changed heating response and Last learning result",
+                self.entry.title,
+            )
         try:
             hysteresis_on, hysteresis_off = hysteresis_margins(self.settings)
         except ValueError as err:
@@ -170,9 +179,33 @@ class CalculatorCoordinator(DataUpdateCoordinator[float]):
             self.settings.get(CONF_CLOSING, []),
         ]
         nonzero = [[e, v] for e, v in sorted(self.minima.items()) if v != 0]
-        # Preserve legacy model binding for the identity mapping, including
-        # explicitly configured zeros. A changed curve is a different plant.
+        # Keep the applied curve as provenance, not a reason to erase learning.
         return binding + [nonzero] if nonzero else binding
+
+    def _compatible_application(self, saved):
+        """Retain learning across range tuning, never across rooms/actuators/modes."""
+        current = self._application_binding()
+        previous = saved.get(
+            "application", current if self.mode != MODE_DIRECT else None
+        )
+        if not isinstance(previous, list) or len(previous) not in (3, 4):
+            return False
+        if previous[:3] != current[:3]:
+            return False
+        if len(previous) == 4:
+            minima = previous[3]
+            if not isinstance(minima, list) or any(
+                not isinstance(item, list) or len(item) != 2 for item in minima
+            ):
+                return False
+            try:
+                values = dict(minima)
+                if len(values) != len(minima):
+                    return False
+                valve_minima({CONF_OPENING: previous[1], CONF_MIN_OPENING: values})
+            except ValueError, TypeError:
+                return False
+        return True
 
     def model_diagnostics(self):
         data = self.engine.diagnostics()
