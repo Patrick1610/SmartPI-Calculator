@@ -1,5 +1,7 @@
 """A numerical demand sensor, not a climate or actuator entity."""
 
+import math
+
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
@@ -34,6 +36,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             LearningSampleSensor(entry, "cooling"),
             LastLearningResultSensor(entry),
             *[ContributionSensor(entry, key) for key in CONTRIBUTION_NAMES],
+            UnboundedPIDemandSensor(entry),
         ]
     )
 
@@ -84,6 +87,34 @@ class DemandSensor(CalculatorSensor):
             "upstream_commit": UPSTREAM_COMMIT,
             "control_mode": self.coordinator.mode,
         }
+
+
+class UnboundedPIDemandSensor(CalculatorSensor):
+    """Sum one cached PI snapshot before final output/actuator constraints."""
+
+    _attr_translation_key = "unbounded_pi_demand"
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 2
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:sigma"
+
+    def __init__(self, entry):
+        super().__init__(entry, "unbounded_pi_demand")
+
+    @property
+    def native_value(self):
+        diagnostics = self.coordinator.model_diagnostics()
+        values = [diagnostics.get(key) for key in CONTRIBUTION_NAMES]
+        if any(value is None for value in values):
+            return None
+        try:
+            if not all(math.isfinite(value) for value in values):
+                return None
+            total = math.fsum(values)
+        except TypeError, ValueError, OverflowError:
+            return None
+        return total if math.isfinite(total) else None
 
 
 class ContributionSensor(CalculatorSensor):

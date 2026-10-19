@@ -1,5 +1,10 @@
 {
   "title": "SmartPI Calculator",
+  "entity": {
+    "sensor": {
+      "unbounded_pi_demand": {"name": "Unbounded PI demand"}
+    }
+  },
   "config": {
     "step": {
       "user": {
