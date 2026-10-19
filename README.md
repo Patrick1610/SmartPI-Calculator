@@ -4,7 +4,7 @@ An unofficial Home Assistant wrapper around the existing SmartPI mathematical
 core from [KipK/vtherm_smartpi](https://github.com/KipK/vtherm_smartpi).
 No VTherm integration is required. This is not an original or rewritten PI algorithm.
 
-**Experimental source candidate (`0.2.3`).** It computes a heating-demand percentage and can
+**Experimental source candidate (`0.2.4`).** It computes a heating-demand percentage and can
 optionally write explicitly selected valve endpoints. Start with **Learning disabled**.
 
 Repository: [Patrick1610/SmartPI-Calculator](https://github.com/Patrick1610/SmartPI-Calculator).
@@ -14,7 +14,7 @@ Repository: [Patrick1610/SmartPI-Calculator](https://github.com/Patrick1610/Smar
 - Reads **room temperature**, **target temperature**, and **current outdoor temperature**
   from three selected numerical entities. No TRV-temperature dependence.
 - Fixed HEAT mode; periodic updates every 30 seconds, logical bookkeeping cycles of 10 minutes.
-- Publishes **Heating demand**, 0–100%, and thirteen diagnostic sensors.
+- Publishes **Heating demand**, 0–100%, and fourteen diagnostic sensors.
 - Publishes an unavailable sensor on invalid input; never substitutes a fictitious 0 °C.
 - Saves learned model/PI state with Home Assistant storage and restores it after reload/restart.
 - No climate entity, schedules, target-writing automations, thermal valve curve, or boiler/pump
@@ -159,7 +159,7 @@ control mode and static metadata. Values with dedicated sensors are not duplicat
 attributes: use those entities for temperatures, phase, learning status, valve status,
 sample counts and the last learning result. Configuration diagnostics can also be downloaded from
 Home Assistant. Source entity IDs are redacted in that download.
-No extra translation sensor is created: Heating demand and the four contribution sensors
+No extra valve-translation sensor is created: Heating demand, Unbounded PI demand and the four contribution sensors
 describe the normalized calculation; the existing opening/closing **number entities** give
 the per-radiator command history. Downloadable diagnostics include a redacted snapshot of
 each configured minimum and its requested mapped endpoints, not measured positions.
@@ -203,7 +203,18 @@ PI evaluation have no valid decomposition: these sensors show unknown, never fic
 Only the harness reads existing core results; vendor math and control settings are unchanged.
 Recorder retention/exclusions apply, and measurement state class permits numeric statistics.
 
-There are fourteen sensors per instance. All except Valve control status become unavailable
+**Unbounded PI demand** (Dutch: **Onbegrensde PI-vraag**) publishes the signed sum of
+those four terms from one cached evaluation, before final 0–100% output clamping, landing
+caps, rate limiting and actuator-step rounding. It retains negative values and values
+above 100%; for example `4.49 - 25.09 + 0 + 0 = -20.60%`, while Heating demand can be 0%.
+This is a diagnostic candidate, not a cooling request, measured heat or a valve position.
+Earlier component-level guards/limits still apply; “unbounded” does not mean every
+internal safeguard is bypassed. Missing/invalid terms give unknown, never a partial sum
+or zero. It is enabled by default, has measurement state class and two display decimals,
+and uses the same Recorder policy as the other calculation sensors. Reading it does not
+recalculate or change PI/learning/valve state. Existing histories are not backfilled.
+
+There are fifteen sensors per instance. All except Valve control status become unavailable
 when calculation fails. Existing sensor unique IDs are retained; a/b,
 Kp/Ki, control mode and static metadata remain attributes, not additional entities.
 Templates and dashboards using the removed duplicate attributes must use the corresponding
@@ -221,7 +232,7 @@ that a learned PI model is active or that heat is physically being delivered.
 
 Install through HACS as a **custom repository**: add
 `https://github.com/Patrick1610/SmartPI-Calculator` with type **Integration**. Once source
-candidate `0.2.3` has a published release, download it and restart Home Assistant.
+candidate `0.2.4` has a published release, download it and restart Home Assistant.
 Then select **Settings → Devices & services
 → Add integration → SmartPI Calculator**. This is not inclusion in HACS's default catalog;
 that requires a separate upstream review. HACS manages files and updates, not room setup.
@@ -283,9 +294,9 @@ mode. Passing local tests is not a physical
 heating validation. A source publication does not itself install or connect the output.
 
 Verified locally on 2026-10-19 with Python 3.14.4 / Home Assistant 2026.10.1:
-173 tests pass; Ruff, format checks and compileall pass. All 35 pinned vendor hashes match.
+184 tests pass; Ruff, format checks and compileall pass. All 35 pinned vendor hashes match.
 An isolated temporary HA instance loads the
-actual integration and all fourteen sensors, reports unavailable on invalid input, recovers,
+actual integration and all fifteen sensors, reports unavailable on invalid input, recovers,
 restores integral state across reload, and unloads. Configuration tests exercise the
 current HA `probatio` schema API (a core dependency in this baseline).
 A synthetic 24-hour heating/cooling run reaches both bootstrap and stable phases and
@@ -317,3 +328,9 @@ verify unload/save, reload, live diagnostic sensor values and persisted sample h
 They also cover unchanged outlier rejection before cooling convergence and the existing
 drift-recentering path after accepted cooling observations make it eligible. This does
 not guarantee that a new physical valve range will automatically re-identify in practice.
+
+The 0.2.4 change adds only the Unbounded PI demand diagnostic sensor and its English/Dutch
+names. Tests cover negative, zero and above-100 output, invalid/missing terms, finite-sum
+overflow, a single cached read without mutation, both languages in real isolated HA,
+unavailable/recovery and retained sensor IDs. Control/model/storage code and pinned
+vendor files are unchanged; no settings migration or model reset is introduced.
