@@ -6,6 +6,7 @@ import asyncio
 import logging
 import math
 from datetime import timedelta
+from time import monotonic
 
 from homeassistant.const import UnitOfTemperature
 from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
@@ -55,6 +56,7 @@ class CalculatorCoordinator(DataUpdateCoordinator[float]):
         self.minima = {}
         self._control_lock = asyncio.Lock()
         self._stopping = False
+        self._next_storage_save_request = 0.0
 
     async def initialize(self):
         if self.mode == MODE_DIRECT:
@@ -161,7 +163,12 @@ class CalculatorCoordinator(DataUpdateCoordinator[float]):
                 self.engine.set_feedback(False)
                 await self.valves.close()
             raise UpdateFailed(str(err)) from err
-        self.store.async_delay_save(self._storage_data, 60)
+        # A 60-second Store debounce is starved by 30-second updates. Rate-limit
+        # requests ourselves and queue a nonblocking write without that delay.
+        now = monotonic()
+        if now >= self._next_storage_save_request:
+            self.store.async_delay_save(self._storage_data, 0)
+            self._next_storage_save_request = now + 60
         return value
 
     def _storage_data(self):

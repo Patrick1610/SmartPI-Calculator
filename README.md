@@ -4,7 +4,7 @@ An unofficial Home Assistant wrapper around the existing SmartPI mathematical
 core from [KipK/vtherm_smartpi](https://github.com/KipK/vtherm_smartpi).
 No VTherm integration is required. This is not an original or rewritten PI algorithm.
 
-**Experimental source candidate (`0.2.4`).** It computes a heating-demand percentage and can
+**Experimental source candidate (`0.2.5`).** It computes a heating-demand percentage and can
 optionally write explicitly selected valve endpoints. Start with **Learning disabled**.
 
 Repository: [Patrick1610/SmartPI-Calculator](https://github.com/Patrick1610/SmartPI-Calculator).
@@ -20,6 +20,14 @@ Repository: [Patrick1610/SmartPI-Calculator](https://github.com/Patrick1610/Smar
 - No climate entity, schedules, target-writing automations, thermal valve curve, or boiler/pump
   control. Only Direct valve control writes `number.set_value` to selected endpoints.
   Nothing is installed into an existing HA automatically.
+
+Model saves are queued without an additional delay after the first successful
+calculation, then rate-limited to one request per 60 seconds. Under a healthy
+30-second calculation loop this normally writes every 60–90 seconds. The write
+captures the latest complete model, not a snapshot from the scheduling instant.
+Normal unload/shutdown still saves explicitly. A failed or externally consumed write
+cannot disable later periodic requests. This limits ordinary storage lag, not the
+consequences of a crash during an outstanding or failed write.
 
 The original control law, bootstrap, deadband, integral management and learning rules are
 retained. Reaching the setpoint is **not** an additional command to shut the output off.
@@ -232,7 +240,7 @@ that a learned PI model is active or that heat is physically being delivered.
 
 Install through HACS as a **custom repository**: add
 `https://github.com/Patrick1610/SmartPI-Calculator` with type **Integration**. Once source
-candidate `0.2.4` has a published release, download it and restart Home Assistant.
+candidate `0.2.5` has a published release, download it and restart Home Assistant.
 Then select **Settings → Devices & services
 → Add integration → SmartPI Calculator**. This is not inclusion in HACS's default catalog;
 that requires a separate upstream review. HACS manages files and updates, not room setup.
@@ -293,8 +301,8 @@ retries, per-radiator rescaling, normalized learning, closing and no writes outs
 mode. Passing local tests is not a physical
 heating validation. A source publication does not itself install or connect the output.
 
-Verified locally on 2026-10-19 with Python 3.14.4 / Home Assistant 2026.10.1:
-184 tests pass; Ruff, format checks and compileall pass. All 35 pinned vendor hashes match.
+Verified locally on 2026-10-20 with Python 3.14.4 / Home Assistant 2026.10.1:
+193 tests pass; Ruff, format checks and compileall pass. All 35 pinned vendor hashes match.
 An isolated temporary HA instance loads the
 actual integration and all fifteen sensors, reports unavailable on invalid input, recovers,
 restores integral state across reload, and unloads. Configuration tests exercise the
@@ -334,3 +342,13 @@ names. Tests cover negative, zero and above-100 output, invalid/missing terms, f
 overflow, a single cached read without mutation, both languages in real isolated HA,
 unavailable/recovery and retained sensor IDs. Control/model/storage code and pinned
 vendor files are unchanged; no settings migration or model reset is introduced.
+
+The 0.2.5 fix prevents the 30-second calculation loop from indefinitely postponing
+60-second delayed model saves, using immediate queued writes at a bounded request
+frequency instead. It changes only save scheduling: storage format,
+source/application identity checks, accepted sample buffers, model/PI calculations,
+valve writes, sensor IDs and configuration entries are unchanged. Existing instances
+are updated in place; do not remove/recreate them or reset their models. Regression
+tests drive the real HA Store with a virtual timer through ongoing updates and verify
+periodic writes of the latest buffers, snapshot failures, invalid-input stretches,
+final-write/shutdown and older-format model reload preservation.
